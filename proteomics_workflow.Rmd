@@ -1,0 +1,145 @@
+---
+title: "Integrating proteomics data"
+author: "Pratheepa Jeganathan, Laura Symul, Susan Holmes"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: 
+  BiocStyle::html_document
+params:
+  K: 15
+  iter: 2000
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+  message = FALSE,
+  warning = FALSE)
+```
+
+
+```{r read_arg}
+K = params$K
+K
+iter = params$iter
+iter
+```
+
+```{r}
+#library(flowCore)
+library(SingleCellExperiment)
+library(ggplot2)
+library(rstan)
+library(scater)
+library(plyr)
+library(reshape2)
+library(readr)
+#library(CATALYST)
+library(magrittr)
+```
+
+
+# Mass-Tag CyTOF Breast Cancer Data
+
+- **cd45.sce**: CD45+ cells from the live cells; downsampled to 426,872 cells (assayed on immune panel) $\times$ 35 proteins
+
+```{r}
+# load("./Data/masstagSCE.rda")
+# cd45.sce # 38 * 426872 
+# rm(epith.sce, livecells.sce, myeloid.sce, tcell.sce)
+
+```
+
+Drop the five subjects without any clinical data. We can use Gender variable to identify those subejcts
+```{r}
+# unique(colData(cd45.sce)$patient_id.y[which(is.na(colData(cd45.sce)$Gender))])
+
+# cd45_to_keep <- which(!is.na(colData(cd45.sce)$Gender))
+# cd45.sce_dropna <- cd45.sce[,cd45_to_keep]
+# cd45.sce_dropna # 38 * 420685
+# # To verify there are no (true) NA's left:
+# sum(is.na(rowData(cd45.sce_dropna)))
+# rm(cd45.sce, cd45_to_keep)
+```
+
+
+```{r}
+#saveRDS(cd45.sce_dropna, "./Data/cd45_sce_dropna.rds")
+cd45_sce_dropna = readRDS("./Data/cd45_sce_dropna.rds")
+```
+
+# Keren et al., MIBI-TOF Breast Cancer Data 
+
+```{r}
+load('./Data/mibiSCE.rda')
+mibi.sce
+```
+
+Rows correspond to channels and columns correspond to cells.
+We can see all of the channels that were collected in this experiment:
+
+```{r}
+rownames(mibi.sce)
+```
+
+
+The 38 proteins can be easily identified by using the binary attribute is_protein from rowData:
+
+```{r}
+proteins = rowData(mibi.sce)$is_protein==1
+sum(proteins)
+mibi.sce_proteins <- mibi.sce[which(proteins),]
+mibi.sce_proteins
+rownames(mibi.sce_proteins)
+
+rm(mibi.sce)
+```
+
+Cell type information is availble in the columns *tumor_group* and *immune_group* 
+
+51% of cells were Keratin positive tumor cells and 41% of cells were immune cells.
+
+```{r}
+round(table(mibi.sce_proteins$tumor_group)/ncol(mibi.sce_proteins),2)
+```
+
+
+Among the immune cell population, macrophages and CD8, CD4+ T-cells and other immune cells were identified.  10% of all cells assayed were macrophages
+
+```{r}
+# Immune Cells
+round(table(mibi.sce_proteins$immune_group)/ncol(mibi.sce_proteins),2)
+```
+
+
+These fields can be used to subset by cell and/or sample characteristic. E.g., below we subset only for the 83,336 cells identified as immune.
+
+```{r}
+immune_inds <- which(mibi.sce_proteins$tumor_group == "Immune")
+mibi.sce_immune <- mibi.sce_proteins[,immune_inds]
+mibi.sce_immune
+
+mibi_sce_immune <- mibi.sce_immune
+
+rm(mibi.sce_proteins, mibi.sce_immune)
+```
+
+
+## Merge two SingleCellExperiment objects
+
+There are three protein without gene symbol in cd45_sce_dropna so we drop them
+```{r}
+Proteins_in_cd45 <- !(rowData(cd45_sce_dropna)$hgnc_symbol == "na")
+
+cd45_sce_dropna <- cd45_sce_dropna[which(Proteins_in_cd45),]
+cd45_sce_dropna
+```
+
+
+
+Proteins in both CD45 cells from the live cells (assayed on immune panel) and donor immune cells
+```{r}
+sum(rownames(cd45_sce_dropna) %in% rownames(mibi_sce_immune))
+```
+
+Note: we need to do inverse of arcsinh. Then, do median-of-ratios, make integer values.
+
+
