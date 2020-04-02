@@ -33,9 +33,9 @@ knitr::opts_chunk$set(echo = TRUE,
 
 
 ```{r read_arg}
-K = params$K
+K <- params$K
 K
-iter = params$R
+iter <- params$R
 iter
 ```
 
@@ -65,7 +65,7 @@ library(RColorBrewer)
 - For this analysis we use **cd45.sce**: CD45+ cells from the live cells; downsampled to 426,872 cells (assayed on immune panel) $\times$ 35 proteins
 
 ```{r}
-# load("./Data/masstagSCE.rda")
+# load("../Data/masstagSCE.rda")
 # cd45.sce # 38 * 426872 
 # rm(epith.sce, livecells.sce, myeloid.sce, tcell.sce)
 
@@ -85,8 +85,8 @@ Drop the five subjects without any clinical data. We can use Gender variable to 
 
 
 ```{r}
-#saveRDS(cd45.sce_dropna, "./Data/cd45_sce_dropna.rds")
-cd45_sce_dropna = readRDS("./Data/cd45_sce_dropna.rds")
+#saveRDS(cd45.sce_dropna, "../Data/cd45_sce_dropna.rds")
+cd45_sce_dropna <- readRDS("../Data/cd45_sce_dropna.rds")
 ```
 
 # Keren et al., MIBI-TOF Breast Cancer Data 
@@ -96,7 +96,7 @@ cd45_sce_dropna = readRDS("./Data/cd45_sce_dropna.rds")
 - The size-normalized raw intensity values are then arcsinh transformed and standardized across the markers. 
 
 ```{r}
-load('./Data/mibiSCE.rda')
+load('../Data/mibiSCE.rda')
 mibi.sce
 ```
 
@@ -111,7 +111,7 @@ rownames(mibi.sce)
 The 38 proteins can be easily identified by using the binary attribute is_protein from rowData:
 
 ```{r}
-proteins = rowData(mibi.sce)$is_protein==1
+proteins <- rowData(mibi.sce)$is_protein==1
 sum(proteins)
 mibi.sce_proteins <- mibi.sce[which(proteins),]
 mibi.sce_proteins
@@ -271,6 +271,40 @@ assay(mae[["mibi"]]) <- inv_func2(assay(mae[["mibi"]]))
 names(rowData(mae[["mibi"]]))[1] <- "marker_name"
 ```
 
+Remove features with all zero values
+```{r}
+for(i in 1:length(mae)){
+  not_all_zeros <- apply(assay(mae, i), 1, function(x){sum(x > 0) > 1})
+  names_not_all_zeros <- names(not_all_zeros)[which(not_all_zeros)]
+  row_names <- rownames(mae)
+  row_names[[names(mae)[i]]] <- names_not_all_zeros
+  mae = mae[row_names, , ]
+}
+```
+
+
+# Converting each scale to have the same lower and upper levels
+
+$y = \left(\dfrac{x-x_{\text{min}}}{x_{\text{range}}}\right) \times u$, where $u$ is the upper limit of the rescaled variable.
+
+We will scale cd45 and mibi to upper limit of cd45
+```{r}
+u <- max(assay(mae[["cd45"]])) 
+x_mibi <- assay(mae[["mibi"]]) 
+y_mibi <- apply(x_mibi, 1, function(x){
+  xmin <- min(x)
+  xrange <- max(x) - min(x)
+  y <- (x-xmin)/xrange*u
+  return(y)
+})
+y_mibi <- t(y_mibi)
+
+#y_mibi[is.na(y_mibi)] <- 0
+assay(mae[["mibi"]]) <- y_mibi
+
+```
+
+
 # Topic modeling
 
 ```{r}
@@ -280,39 +314,37 @@ x <-  full_join(x1, x2)
 common_markers <- colnames(x1)[colnames(x1) %in% colnames(x2)]
 common_markers
 rm(x1,x2) 
-#x = wideFormat(mae) %>% data.frame()
 
-# rownames(x) = x[, 1]
-# x = x[,-1]
+# some features are not recorded in one domain
 x[is.na(x)] <- 0
 
-ot = t(x)
-geo_mean = function(x) {
+ot <- t(x)
+geo_mean <- function(x) {
         if(all(x == 0)){
-            val = 0
+            val <- 0
         }else{
-            val = exp(sum(log(x[x > 0]))/length(x))
+            val <- exp(sum(log(x[x > 0]))/length(x))
         }
         return(val)
     }
 
-geom_mean_row = apply(ot, 1, FUN = geo_mean)
+geom_mean_row <- apply(ot, 1, FUN = geo_mean)
 
 
-dj = estimateSizeFactorsForMatrix(ot, median, geoMeans = geom_mean_row)
+dj <- estimateSizeFactorsForMatrix(ot, median, geoMeans = geom_mean_row)
 
-ot = t(t(ot)/dj)
+ot <- t(t(ot)/dj)
 
-x = t(ot)
+x <- t(ot)
 rm(ot)
-x = apply(x , c(1,2), function(y){as.integer(y)})
-x = as.matrix(x)
+x <- apply(x , c(1,2), function(y){as.integer(y)})
+x <- as.matrix(x)
 ```
 
 ```{r}
 # theta[d] ~ dirichlet(alpha), alpha pseudocount for each topic
 # beta[k] ~ dirichlet(gamma), gamma pseudocount for each ASV in each topic
-stan.data = list(K = K, 
+stan.data <- list(K = K, 
   V = ncol(x), 
   D = nrow(x), 
   n = x, 
@@ -322,14 +354,14 @@ stan.data = list(K = K,
 ```
 
 ```{r}
-fileN = paste0("./Results/proteomics_filtered_K_",K,"_ite_",iter,".RData")
+fileN <- paste0("../Results/proteomics_filtered_K_",K,"_ite_",iter,".RData")
 fileN
 ```
 
 
 ```{r}
-t1 = proc.time()
-stan.fit = stan(file = "./lda.stan", 
+t1 <- proc.time()
+stan.fit <- stan(file = "./lda.stan", 
   data = stan.data, 
   iter = iter, 
   chains = 4, 
@@ -356,7 +388,7 @@ load(file = fileN)
 # 
 # tail(rstan::extract(stan.fit)$"lp__")
 
-df = tibble(lp = rstan::extract(stan.fit)$"lp__", Chain = paste0("Chain ", rep(seq_len(4), each = (iter/2))))
+df <- data.frame(lp = rstan::extract(stan.fit)$"lp__", Chain = paste0("Chain ", rep(seq_len(4), each = (iter/2))))
 
 ggplot(data = df) +
   geom_histogram(aes(x = lp, col = Chain, fill = Chain))
@@ -375,13 +407,13 @@ hist(summary(stan.fit, pars = c("theta", "beta"), probs = c(0.1, 0.9))$summary[,
 
 ## Sampler diagnostics
 ```{r}
-sampler_params = get_sampler_params(stan.fit, inc_warmup = FALSE)
+sampler_params <- get_sampler_params(stan.fit, inc_warmup = FALSE)
 colnames(sampler_params[[1]])
 
-mean_accept_stat_by_chain = sapply(sampler_params, function(x) mean(x[, "accept_stat__"]))
+mean_accept_stat_by_chain <- sapply(sampler_params, function(x) mean(x[, "accept_stat__"]))
 mean_accept_stat_by_chain
 
-max_treedepth_by_chain = sapply(sampler_params, function(x) max(x[, "treedepth__"]))
+max_treedepth_by_chain <- sapply(sampler_params, function(x) max(x[, "treedepth__"]))
 max_treedepth_by_chain
 ```
 
@@ -389,39 +421,40 @@ max_treedepth_by_chain
 
 ## Extract posterior samples
 ```{r}
-samples = rstan::extract(stan.fit, permuted = TRUE, inc_warmup = FALSE, include = TRUE)# samples is a list
+samples <- rstan::extract(stan.fit, permuted = TRUE, inc_warmup = FALSE, include = TRUE)# samples is a list
 ```
 
 ## Alignment
 - Create a Topic $*$ Chain matrix
 ```{r}
-source("./RFuns/alignmentMatrix.R")
-source("./RFuns/thetaAligned.R")
-theta = samples$theta 
+source("../R_BANF/alignmentMatrix.R")
+source("../R_BANF/thetaAligned.R")
+theta <- samples$theta 
 aligned <- alignmentMatrix(theta, mae, K, iter = iter, chain = 4)
 theta_aligned <- thetaAligned(theta, K, aligned, iter = iter, chain = 4)
-dimnames(theta_aligned)[[2]] = colnames(mae) %>% unlist() %>% as.character()
-dimnames(theta_aligned)[[3]] = c(paste0("Topic_", seq(1,K)))
+dimnames(theta_aligned)[[2]] <- colnames(mae) %>% unlist() %>% as.character()
+dimnames(theta_aligned)[[3]] <- c(paste0("Topic_", seq(1,K)))
 ```
+
 
 ```{r}
 # array to a dataframe
-theta_all = melt(theta_aligned)
-colnames(theta_all) = c("iteration", "Sample", "Topic", "topic.dis")
-theta_all$Chain = paste0("Chain ", rep(seq(1, 4), each = (iter/2)))
+theta_all <- melt(theta_aligned)
+colnames(theta_all) <- c("iteration", "Sample", "Topic", "topic.dis")
+theta_all$Chain <- paste0("Chain ", rep(seq(1, 4), each = (iter/2)))
 
-sam = colData(mae) %>% data.frame()
-theta_all$Sample = as.character(theta_all$Sample)
-theta_all = left_join(theta_all, sam, by =c("Sample"= "SampleID"))
-theta_all$Chain = factor(theta_all$Chain)
-theta_all$Topic = factor(theta_all$Topic)
+sam <- colData(mae) %>% data.frame()
+theta_all$Sample <- as.character(theta_all$Sample)
+theta_all <- left_join(theta_all, sam, by =c("Sample"= "SampleID"))
+theta_all$Chain <- factor(theta_all$Chain)
+theta_all$Topic <- factor(theta_all$Topic)
 theta_all$immune_group[which(is.na(theta_all$immune_group))] <- "Unknown"
 theta_all$immune_group <- factor(theta_all$immune_group)
 ```
 
 ## Plot the topic distribution in each chain
 ```{r}
-p_chain = ggplot(data = theta_all) + 
+p_chain <- ggplot(data = theta_all) + 
   geom_boxplot(aes(x = Sample, y = topic.dis, 
                    color = Topic, group = Sample)) + 
   facet_grid(Topic ~ Chain, scales = "free_x")+
@@ -442,7 +475,7 @@ p_chain
 
 ## Plot the topic distribution in all chains
 ```{r}
-p = ggplot(data = theta_all) + 
+p <- ggplot(data = theta_all) + 
   geom_boxplot(aes(x = Sample, y = topic.dis, 
                    color = Topic, group = Sample)) + 
   facet_grid(Topic ~ immune_group, scales = "free_x")+
@@ -463,7 +496,7 @@ p
 
 ## Marker distribution
 ```{r}
-source("./RFuns/betaAligned.R")
+source("../R_BANF/betaAligned.R")
 beta <- samples$beta # an array (iterations *topic * ASV)
 beta_aligned <- betaAligned(beta, K, aligned, iter = iter, chain = 4) # an array (iterations *topic * ASV)
 
@@ -472,8 +505,8 @@ beta_logit <- beta_aligned
 rm(beta_aligned)
 for (i in seq_len(nrow(beta_logit))) {
   for (k in seq_len(K)) {
-    beta_logit[i, k, ] = log(beta_logit[i, k, ])
-    beta_logit[i, k, ] = beta_logit[i, k, ] - mean(beta_logit[i, k, ])
+    beta_logit[i, k, ] <- log(beta_logit[i, k, ])
+    beta_logit[i, k, ] <- beta_logit[i, k, ] - mean(beta_logit[i, k, ])
   }
 }
 
@@ -488,13 +521,13 @@ rm(beta_logit)
 marker_info <- full_join(rowData(mae[["cd45"]]) %>% data.frame(), rowData(mae[["mibi"]]) %>% data.frame())
 marker_info$marker <- marker_info$marker_name
 # If we use a taxanomy level with NA, we can replace the taxanomy level with one level before this level
-#marker_info$Class[which(is.na(marker_info$Class))] = marker_info$Phylum[which(is.na(marker_info$Class))]
+#marker_info$Class[which(is.na(marker_info$Class))] <- marker_info$Phylum[which(is.na(marker_info$Class))]
 
 beta_hat <- beta_hat %>%
   left_join(marker_info, by = "marker") %>% mutate(topic = paste("Topic", topic))
 
 # sort ASV by the number of ASV per Class (there is no NA, if there is NA, we need to replace by some character to make sure that NA does not dominate on sort)
-sorted_marker = names(sort(table(beta_hat$marker_name), decreasing = TRUE))
+sorted_marker <- names(sort(table(beta_hat$marker_name), decreasing = TRUE))
 beta_hat$marker_name <- factor(beta_hat$marker_name)
 beta_hat$marker_name <- factor(beta_hat$marker_name, levels = sorted_marker)
 beta_hat$marker <- factor(beta_hat$marker)
@@ -531,11 +564,11 @@ beta_subset$marker_ix <- rep(seq_len(nrow(beta_subset) / K), each = K)
 
 
 ```{r}
-getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+getPalette <- colorRampPalette(brewer.pal(9, "Set1"))
 ```
 
 ```{r}
-p = ggplot(beta_subset) +
+p <- ggplot(beta_subset) +
   geom_hline(yintercept = 0, alpha = 0.4, size = 0.5, col = "#999999") +
   geom_point(aes(x = marker_ix, y = beta_median, col = marker_name), size = 1) +
   geom_errorbar(aes(x = marker_ix, alpha = beta_upper, ymax = beta_upper, ymin = beta_lower, col = marker_name), size = 0.4) + 

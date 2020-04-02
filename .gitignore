@@ -1,7 +1,3 @@
 Data/
-proteomics.Rmd
-References/
-Abstract/
 Results/
-*.html
-Corrections/
+Docs/*.html
