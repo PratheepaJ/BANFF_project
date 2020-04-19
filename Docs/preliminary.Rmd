@@ -1,0 +1,181 @@
+---
+title: "Exploratory Plots"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  BiocStyle::html_document
+---
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+Let's make some plots.
+
+Loading the data.
+
+```{r}
+data_dir <- file.path("..", "Data")
+load(file.path(data_dir, "masstagSCE.rda"))
+load(file.path(data_dir, "mibiSCE.rda"))
+```
+
+# CD45 Data
+
+```{r}
+dim(cd45.sce) # CD45's by cells
+dim(rowData(cd45.sce)) # CD45 info
+dim(colData(cd45.sce)) # cell info
+```
+
+Looks like each channel corresponds to exactly one marker name, and one hgnc
+symbol. So, the `rowData` is really just a dictionary lookup, it is not data.
+
+```{r}
+row_data <- rowData(cd45.sce) %>%
+  as.data.frame() %>%
+  as_tibble()
+
+summary(row_data)
+```
+
+I'm not going to replace the `na`'s in the `colData` because I think they might be informative.
+```{r}
+
+fct_cols <- which(sapply(colData(cd45.sce), is.factor))
+col_data <- colData(cd45.sce) %>%
+  as.data.frame() %>%
+  as_tibble() %>%
+  mutate_all(as.factor) %>%
+  mutate_at(vars(matches("Score"), matches("percent"), matches("Age")), as.numeric)
+
+summary(col_data)
+
+for (j in seq_len(ncol(col_data))) {
+  cur_col = colnames(col_data)[j]
+  p <- ggplot(col_data) +
+    geom_histogram(
+      aes_string(
+        x = cur_col
+      ),
+      stat = "count"
+    ) +
+    ggtitle(cur_col) +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 0),
+      )
+
+  if (is.factor(col_data[[j]])) {
+    p <- p +
+      scale_x_discrete(label = function(x) abbreviate(x, minlength=10))
+  }
+
+  print(p)
+}
+
+```
+
+Let's look at the assays, at least the marginals.
+
+```{r fig.hold="hold", out.width="15%"}
+x <- assay(cd45.sce)
+dim(x)
+
+for (j in seq_len(nrow(x))) {
+  hist(x[j, ], breaks=100, main=rownames(x)[j])
+}
+```
+
+There are all sorts of ways to combine the rowdata with the assay, to see
+interesting stuff. Here are some examples.
+
+```{r}
+random_patients <- sample(levels(merged_cx$patient_id.x), 10)
+s_ix <- which(col_data$patient_id.x %in% random_patients)
+x_small <- x[, s_ix]
+c_small <- col_data[s_ix, ]
+
+merged_cx <- cbind(t(x_small), c_small) %>%
+  melt(measure.vars = rownames(x), variable.name = "channel")
+```
+
+```{r}
+p <- ggplot(merged_cx) +
+  geom_violin(
+    aes(
+      x = Clinical.Subtype,
+      y = value,
+      fill = Grade
+    ),
+    alpha=0.3,
+  ) +
+  facet_wrap(~ channel)
+
+p + scale_y_sqrt()
+
+
+ggplot(merged_cx) +
+  geom_point(
+    aes(
+      x = Ki.67.percent.positive.cells.by.IHC,
+      y = value,
+      col = Grade
+    ),
+    position = position_jitter(w = 0.5),
+    size= .5,
+    alpha=0.05,
+    ) +
+  facet_wrap(~ channel) +
+  scale_y_sqrt()
+```
+
+##
+
+Now we can look at the MIBI data.
+
+```{r}
+y <- assay(mibi.sce)
+
+sce_mibi <- as_data_frame(t(x)) %>%
+  mutate(source = "sce") %>%
+  rownames_to_column("cell_id") %>%
+  melt(id.vars = c("cell_id", "source"), variable.name = "channel") %>%
+  rbind(
+    as_data_frame(t(y)) %>%
+    mutate(source = "mibi") %>%
+    rownames_to_column("cell_id") %>%
+    melt(id.vars = c("cell_id", "source"), variable.name = "channel")
+  )
+
+cds <- intersect(rownames(x), rownames(y))
+ggplot(sce_mibi %>% filter(channel %in% cds, value > 0)) +
+  geom_histogram(
+    aes(
+      x = sqrt(value),
+      fill = source
+    ),
+  ) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(source~channel, scale="free") +
+  ggtitle("Dstn of shared CD's, positive only")
+
+ggplot(sce_mibi %>% filter(channel %in% cds)) +
+  geom_histogram(
+    aes(
+      x = value <= 0, # many mibi values are < 0
+      fill = source
+    ),
+    stat="count"
+    ) +
+  facet_grid(source~channel, scale="free") +
+  ggtitle("Dstn of shared CD's, presence / absence")
+```
+
+of course we should also try matching histograms on matching subsets (only grade
+3 cancers with other grade 3 cancer cells etc.)
+
+to be continued....
