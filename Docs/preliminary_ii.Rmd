@@ -1,0 +1,89 @@
+---
+title: Summary Statistics
+BiocStyle::html_document
+---
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+Some more effort to become familiar with the data.
+
+# Subsampling
+
+While these data are pleasantly sample-rich, for fast and cheap views, it will
+be nice to subsample to say 50K cells.
+
+# Cells
+
+This is a cell-level analysis. We're looking for the typical groups of channels
+that are on or off together, at the level of individual cells. This analysis is
+repeated twice (one for MIBI, one for Cytof), and ignores relationships between
+the two datasets.
+
+It's the simplest type of analysis of these data, but is worth doing, as due
+diligence.
+
+I. We've looked at marginals already. What are relationships between channels?
+  A. Make a pairs matrix
+    1. Do you notice the usual mass spec mixture plots?
+  B. Make a heatmap across channels
+    1. Do you recover typical clusters of cells?
+    2. Are the clusters of cells related to any phenotypes?
+      i. E.g., plot #'s in each cluster vs. cancer types
+II. How do those relationships change, when you subset to,
+  A. Different clusters of cells
+  B. Different phenotypes for biopsies
+  C. Maybe -- association rules?
+    1. Cancer type 1 -> lots of CDX and T-CellZ?
+    2. Since it's so dense, we might be able to estimate
+    3. Of course, more interested in relationships across clumps of cells and
+       sensing devices
+
+# Clumps of Cells
+
+Things get more interesting when we study clumps of cells at a time. People in
+this field seem to like speaking of an "ecology" of cells -- barriers between
+tumors and immune cells, certain cells "invading" the tumor. Studying one cell
+at a time misses this. We should try to understand how relationships between
+cells / mixings across cell types vary across phenotypes. 
+
+This is again per-device, though.
+
+I. Windowed averages
+  A. Using the already defined cells, look at cell type compositions within
+  moving windows
+    1. This gives a distribution over compositions (distn on simplex)
+    2. Are there relationships between these distributions and observed phenotypes?
+      a. E.g., are those with higher cell heterogeneity related to survival time?
+  B. In theory, can do this with image features too
+    1. Would be interesting to find image prototypes
+      a. "border region"
+      b. "high density immune"
+      c. "low density tumor"
+II. Graphs
+  A. Instead of purely spatial study, can study nearest neighbor graph of cells
+  B. Different 
+    1. Structures (which relate to density)
+    2. Edge pair colorings (which relate to heterogeneity)
+    might be associated with particular phenotypes.
+
+# Different Machines
+
+The challenge's goal is really about this. Considering tradeoffs between devices
+(cost, resolution, ...), we know we'll have both types of devices for a while.
+So, question is how to have them complement each other in a useful way.
+
+The same biopsy will look different to different machines. We only have one
+measurements from one device, for any given biopsy.
+
+An analogy: we can try "matching" biopsies according to their phenotypes, and
+then look for typical device outputs (as well as the typical variation around
+them). So, instead of potential outcomes, we have potential sensings; instead of
+a one dimensional treatment effect of interest, we have some more complex
+mapping between sensor readings.
