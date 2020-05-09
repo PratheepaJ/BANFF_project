@@ -147,4 +147,73 @@ ggplot(col_union) +
   theme(legend.position = "none")
 ```
 
-Okay, now let's join it back in with the assays.
+Okay, now let's join it back in with the assays. The first idea is to get a
+sense of which channels are interesting by using them to predict interesting
+phenotypes. We'll use glmnet, though it's a little silly to do this: our problem
+is actually low-dimensional.
+
+```{r}
+library("caret")
+y <- col_union$Clinical.Subtype
+y[is.na(y)] <- "missing"
+glmnet_fit <- train(
+  X, y,
+  method="glmnet",
+  verbose=TRUE,
+  trControl=trainControl(verboseIter=TRUE, number=3)
+)
+
+#' At least for this response, only marginally related
+table(y) / length(y)
+glmnet_fit
+
+# heatmap of correlation matrices
+heatmap(cor(col_union[sapply(col_union, is.numeric)], as.matrix(X), use="pairwise.complete.obs"))
+dummy <- dummyVars(" ~ .", data = col_union[sapply(col_union, is.character)] %>% select(-contains("id")))
+dx <- predict(dummy, col_union[sapply(col_union, is.character)])
+cor_mat <- cor(dx, as.matrix(X), use="pairwise.complete.obs")
+heatmap(cor_mat)
+cor_mat[which.max(cor_mat)]
+
+ggplot(joined_df) + # example with reasonable correlation
+  geom_histogram(
+    aes(x = CD7)
+  ) +
+  scale_x_continuous(limits = c(1e-3, 6)) +
+  facet_grid(condition.x ~ ., scale="free_y")
+
+ggplot(joined_df) + # cell type is going to be related, by construction
+  geom_histogram(
+    aes(x = CD32)
+  ) +
+  scale_x_continuous(limits = c(1e-3, 6)) +
+  facet_grid(cell_type ~ ., scale="free_y")
+
+ggplot(joined_df) +
+  geom_histogram(
+    aes(x = CD64)
+  ) +
+  scale_x_continuous(limits = c(1e-3, 6)) +
+  facet_grid(cell_type ~ ., scale="free_y")
+
+# in any case, can plot data
+sorted_markers <- coef(glmnet_fit$finalModel)[["LumA"]][, 30]
+sorted_markers <- sorted_markers[order(abs(sorted_markers), decreasing=T)]
+joined_df <- cbind(as_tibble(as.matrix(X)), col_union)
+
+p <- list()
+for (i in 2:6) {
+  p[[i]] <- ggplot(joined_df) +
+    geom_histogram(
+      aes_string(x = names(sorted_markers)[i])
+    ) +
+    facet_wrap(~Clinical.Subtype) +
+    scale_x_continuous(limits = c(1e-4, 8)) # trimming away spike at 0
+}
+
+print(p)
+```
+
+# MIBI
+
+We can do the same exercise with the MIBI data
