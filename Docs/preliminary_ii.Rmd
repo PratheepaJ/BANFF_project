@@ -1,89 +1,150 @@
 ---
-title: Summary Statistics
+title: Cell-Level Analysis
 BiocStyle::html_document
 ---
 
 ```{r}
-library("ggplot2")
 library("dplyr")
+library("forcats")
+library("ggplot2")
+library("readr")
 library("reshape2")
 library("tibble")
-library("forcats")
+library("tidyr")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
-Some more effort to become familiar with the data.
+# (Joining and ) Subsampling [Mass Spec]
 
-# Subsampling
+The data are given to us split by cell types, because they each have a different
+set of markers (apparently[^1 there are a few annoying discrepancies, like
+`HR_DR` in `tcell.sce` and `HLADR` in `livecells.sce`]). We'll join them
+together, and put NA for whenever a particular channels is not available.
 
-While these data are pleasantly sample-rich, for fast and cheap views, it will
-be nice to subsample to say 50K cells.
+This joins the row and column data, but not the assays.
+```{r eval=FALSE}
+data_dir <- file.path("..", "Data")
+load(file.path(data_dir, "masstagSCE.rda"))
+cell_types <- ls()[grep("sce", ls())]
+sapply(cell_types, function(x) get(x))
 
-# Cells
+row_union <- lapply(cell_types, function(x) rowData(get(x)))
+row_union <- do.call(rbind, row_union) %>%
+  as_tibble() %>%
+  unique() %>%
+  arrange(channel_name, marker_name)
 
-This is a cell-level analysis. We're looking for the typical groups of channels
-that are on or off together, at the level of individual cells. This analysis is
-repeated twice (one for MIBI, one for Cytof), and ignores relationships between
-the two datasets.
+col_union <- lapply(cell_types, function(x) as_tibble(colData(get(x))))
+names(col_union) <- cell_types
+col_union <- bind_rows(col_union, .id="cell_type") %>%
+  select(sample_id, starts_with("patient"), everything()) %>%
+  select(-file_name) %>%
+  mutate_at(vars(matches("Age|percent|Score")), as.numeric) %>%
+  mutate_at(vars(-matches("Age|percent|Score")), as_factor)
+```
 
-It's the simplest type of analysis of these data, but is worth doing, as due
-diligence.
+```{r eval=FALSE}
+glimpse(row_union)
+summary(col_union)
+```
 
-I. We've looked at marginals already. What are relationships between channels?
-  A. Make a pairs matrix
-    1. Do you notice the usual mass spec mixture plots?
-  B. Make a heatmap across channels
-    1. Do you recover typical clusters of cells?
-    2. Are the clusters of cells related to any phenotypes?
-      i. E.g., plot #'s in each cluster vs. cancer types
-II. How do those relationships change, when you subset to,
-  A. Different clusters of cells
-  B. Different phenotypes for biopsies
-  C. Maybe -- association rules?
-    1. Cancer type 1 -> lots of CDX and T-CellZ?
-    2. Since it's so dense, we might be able to estimate
-    3. Of course, more interested in relationships across clumps of cells and
-       sensing devices
+Now we'll join the assays across cell types.
 
-# Clumps of Cells
+```{r eval = FALSE}
+library("Matrix")
+X <- list()
 
-Things get more interesting when we study clumps of cells at a time. People in
-this field seem to like speaking of an "ecology" of cells -- barriers between
-tumors and immune cells, certain cells "invading" the tumor. Studying one cell
-at a time misses this. We should try to understand how relationships between
-cells / mixings across cell types vary across phenotypes. 
+for (i in seq_along(cell_types)) {
+  print(cell_types[i])
+  X[[i]] <- get(cell_types[i]) %>%
+    assay() %>%
+    t() %>%
+    as_tibble()
+  rm(list = cell_types[i])
+}
 
-This is again per-device, though.
+X <- bind_rows(X) %>%
+  as.matrix() %>%
+  Matrix(sparse=TRUE)
 
-I. Windowed averages
-  A. Using the already defined cells, look at cell type compositions within
-  moving windows
-    1. This gives a distribution over compositions (distn on simplex)
-    2. Are there relationships between these distributions and observed phenotypes?
-      a. E.g., are those with higher cell heterogeneity related to survival time?
-  B. In theory, can do this with image features too
-    1. Would be interesting to find image prototypes
-      a. "border region"
-      b. "high density immune"
-      c. "low density tumor"
-II. Graphs
-  A. Instead of purely spatial study, can study nearest neighbor graph of cells
-  B. Different 
-    1. Structures (which relate to density)
-    2. Edge pair colorings (which relate to heterogeneity)
-    might be associated with particular phenotypes.
+sample_ix <- sample(seq_len(nrow(X)), 1e4)
+X <- X[sample_ix, ]
+X[is.na(X)] <- 0
+col_union <- col_union[sample_ix, ]
+```
 
-# Different Machines
+```{r eval = FALSE}
+saveRDS(X, file.path(data_dir, "mass_spec_sample.rds"))
+write_csv(col_union, file.path(data_dir, "../Data/cell_info_sample.csv"))
+write_csv(row_union, file.path(data_dir, "../Data/marker_info_sample.csv"))
+```
 
-The challenge's goal is really about this. Considering tradeoffs between devices
-(cost, resolution, ...), we know we'll have both types of devices for a while.
-So, question is how to have them complement each other in a useful way.
+# Cell-Level [Mass Spec]
 
-The same biopsy will look different to different machines. We only have one
-measurements from one device, for any given biopsy.
+Reading in the subsampled data...
+```{r}
+X <- readRDS(file.path(data_dir, "mass_spec_sample.RDS"))
+row_union = read_csv(file.path(data_dir, "marker_info_sample.csv"))
+col_union <- read_csv(file.path(data_dir, "cell_info_sample.csv"))
+```
 
-An analogy: we can try "matching" biopsies according to their phenotypes, and
-then look for typical device outputs (as well as the typical variation around
-them). So, instead of potential outcomes, we have potential sensings; instead of
-a one dimensional treatment effect of interest, we have some more complex
-mapping between sensor readings.
+We can make standard pair plots and a heatmap. The heatmap is a bit artificial, since we joined across cell types which didn't all have the same markers.
+```{r}
+clust_cells <- hclust(dist(X))
+clust_markers <- hclust(dist(t(X)))
+
+plot_ix <- c(1, 9, 17, 25, 33, 41, 49, 57, 65, 74)
+for (i in plot_ix) {
+  pairs(
+    as.matrix(X[, clust_markers$order[plot_ix[i]:plot_ix[i + 1]]]),
+    cex=0.1, col=rgb(0, 0, 0, 0.1)
+  )
+}
+
+heatmap(as.matrix(X))
+```
+
+
+Let's refresh ourselves about the phenotypic data, before trying to link it up
+with the assays.
+```{r}
+ggplot(col_union) +
+  geom_histogram(aes(x = Health.Status), stat="count")
+ggplot(col_union) +
+  geom_histogram(aes(x = Histopathology), stat="count") +
+  theme(axis.text.x = element_text(angle = -90))
+ggplot(col_union) +
+  geom_histogram(aes(x = Clinical.Subtype), stat="count")
+ggplot(col_union) +
+  geom_histogram(aes(x = ER.IRS.Score))
+ggplot(col_union) +
+  geom_histogram(aes(x = ER.percent.positive.cells.by.IHC))
+ggplot(col_union) +
+  geom_violin(aes(x = Clinical.Subtype, y = ER.IRS.Score))
+
+u <- col_union[, sapply(col_union, is.numeric)]
+for (j in seq_len(ncol(u))) {
+  iqr <- IQR(u[[j]], na.rm=T)
+  u[, j] <- u[, j] + runif(nrow(u), -0.15 * iqr, 0.15 * iqr)
+}
+
+pairs(u, cex=0.1, col=rgb(0, 0, 0, 0.1))
+rm(u, iqr)
+
+ggplot(col_union) +
+  geom_jitter(
+    aes(
+      x = Histopathology,
+      y = PR.IRS.Score,
+      col = Clinical.Subtype
+    ),
+    size = 0.1,
+    alpha = 0.2
+  ) +
+  scale_x_discrete(label = function(x) abbreviate(x, minlength=10)) +
+  facet_grid(~Clinical.Subtype, scales="free_x") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none")
+```
+
+Okay, now let's join it back in with the assays.
