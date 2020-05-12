@@ -1,0 +1,62 @@
+---
+title: Features from MIBI Segmentations
+BiocStyle::html_document
+---
+
+For the MIBI data, we have segmentation masks telling us where the cells are
+located. The masks themselves are not interesting. However, they give
+information about cell-ecosystem heterogeneity and composition which *is* very
+interesting. This script produces some intermediate outputs that get more
+directly at those questions,
+
+* Split-Channel Segmentations: Each channel in this array is a segmentation mask
+  associated with a particular cell type, derived from the `cellData` table. It
+  makes it easier to compute the density of different types.
+* Shared-Border Graphs: For each cell, we can identify the cells with which it
+  shares a border. Each node is associated with a cell type and ID. Ideally, the
+  edges would be weighted by the length of the shared border, though I'm not
+  sure if that's easy to compute.
+* Moving Window Graphs: The shared-border approach will ignore cells that are
+  near, but not bordering, others. This approach instead links two cells if they
+  are within a distance $\eps$ of one another.
+* Moving Window Statistics: For each window, we can different cell densities.
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+library("raster")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+```{r}
+data_dir <- file.path("..", "Data", "TNBC_shareCellData")
+f <- list.files(data_dir, "*tif", full.names = TRUE)[1]
+im <- raster(f)
+```
+
+Let's convert the image into polygons
+
+```{r}
+library("stars")
+polys <- st_as_stars(im) %>%
+  st_as_sf(merge = TRUE) %>%
+  st_cast("MULTILINESTRING")
+```
+
+Now let's join polygons that are neighbors. Notice that there is a thin border
+between cells. We'll need to ignore that when defining neighbors.
+
+```{r}
+library("spdep")
+polys0 <- polys %>%
+  filter(p1_labeledcellData > 1)
+test <- poly2nb(polys0, snap=1)
+coords <- st_coordinates(st_centroid(st_geometry(polys0)))
+
+plot(st_geometry(polys0))
+plot(test, coords, add=T)
+```
+

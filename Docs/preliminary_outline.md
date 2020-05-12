@@ -21,10 +21,10 @@ _Images / Graphs_: We're used to performing dimensionality reduction on tables
 of numbers, where each column already has some pre-specified meaning ("amount of
 CD4"). But these data come with images, each of which is associated with a
 biopsy (for TOF) or a cell (for MIBI). We need to extract meaningful features
-from these raw pixel values: either from the raw pixels or the graph derived by
-looking at co-located cells. For example, the amount of mixing between immune
-vs. tumor cells is supposed to be predictive of survival, but it's not something
-measured directly by any sensors.
+from these images: either from the raw pixels or the graph derived by looking at
+co-located cells. For example, the amount of mixing between immune vs. tumor
+cells is supposed to be predictive of survival, but it's not something measured
+directly by any sensors.
 
 Here's a MIBI image. For each cell, we have marker intensities.
 ![mibi](figure/mibi.png) 
