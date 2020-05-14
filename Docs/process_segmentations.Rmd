@@ -1,5 +1,7 @@
 ---
 title: Features from MIBI Segmentations
+params:
+  sample_id: 5
 ---
 
 For the MIBI data, we have segmentation masks telling us where the cells are
@@ -8,98 +10,106 @@ information about cell-ecosystem heterogeneity and composition which *is* very
 interesting. This script produces some intermediate outputs that get more
 directly at those questions,
 
-* Split-Channel Segmentations: Each channel in this array is a segmentation mask
-  associated with a particular cell type, derived from the `cellData` table. It
-  makes it easier to compute the density of different types.
-* Shared-Border Graphs: For each cell, we can identify the cells with which it
-  shares a border. Each node is associated with a cell type and ID. Ideally, the
-  edges would be weighted by the length of the shared border, though I'm not
-  sure if that's easy to compute.
-* Moving Window Graphs: The shared-border approach will ignore cells that are
-  near, but not bordering, others. This approach instead links two cells if they
-  are within a distance $\eps$ of one another.
-* Moving Window Statistics: For each window, we can different cell densities.
+* Polygons: We convert the raster into shapefiles, so that we can apply
+  geometric logic to them (getting centroids, areas, borders, ...)
+* Graphs: We can think of each cell as a node and declare edges if the cells are
+  within a certain distance / are K nearest neighbors.
+* Derived Statistics: For either polygons or graphs, we show how you can get
+  statistics from local neighborhoods, like the proportion of the local
+  neighborhood that's background.
 
 ```{r}
-library("ggplot2")
 library("dplyr")
-library("reshape2")
-library("tibble")
-library("readr")
-library("forcats")
+library("ggplot2")
+library("igraph")
 library("raster")
+library("readr")
+library("spdep")
+library("stars")
+library("stringr")
+library("reshape2")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
 ```{r}
+sample_id <- params$sample_id
 data_dir <- file.path("..", "Data", "TNBC_shareCellData")
-f <- list.files(data_dir, "*tif", full.names = TRUE)[1]
+f <- list.files(data_dir, str_interp("p${sample_id}_"), full.names = TRUE)
 im <- raster(f)
-## im <- crop(im, extent(im, 0, 250, 0, 250))
+## im <- crop(im, extent(im, 0, 250, 0, 250)) # uncomment to test on cropped data
 ```
 
-Let's convert the image into polygons
+# Polygonization
+
+It can be helpful to work directly with polygon geometries, rather than the
+original raster image. You can then use any logic you'd have used for
+manipulating geographic shapefiles, for example.
 
 ```{r}
-library("stars")
 polys <- st_as_stars(im) %>%
   st_as_sf(merge = TRUE) %>%
   st_cast("POLYGON")
+colnames(polys)[1] <- "cellLabelInImage"
 ```
 
-Now let's join polygons that are neighbors. Notice that there is a thin border
-between cells. We'll need to ignore that when defining neighbors.
+This will join polygons that are neighbors. Notice that there is a thin border
+between cells, so we'll ignore that using the `snap` argument in `poly2nb`.
 
 ```{r fig.width=14, fig.height=14}
-library("spdep")
 cell_data <- read_csv(file.path(data_dir, "cellData.csv")) %>%
-  filter(SampleID == 1)
+  filter(SampleID == sample_id)
 
-polys0 <- polys %>%
-  inner_join(cell_data, by = c("p1_labeledcellData" = "cellLabelInImage")) %>%
-  group_by(p1_labeledcellData) %>% # some polygons are individual pixels at corners --> take union
-  summarise_all(function(x) {x[1]})
-
-nb_contig <- poly2nb(polys0, snap=1)
-coords <- st_coordinates(st_centroid(st_geometry(polys0)))
-
-plot(polys0$geometry[1:nrow(polys0)])
-plot(nb_contig, coords, add=T)
+polys <- polys %>%
+  inner_join(cell_data) %>%
+  group_by(cellLabelInImage) %>% # some regions get split into two adjacent polys --> merge
+  summarise_all(first)
 ```
 
-Alternatively, we can compute the k nearest neighbors for each point, even if
-they aren't bordering any cells themselves.
-
-```{r fig.width=14, fig.height=14}
-nb_knn <- knn2nb(knearneigh(coords, k = 5))
-plot(polys0$geometry[1:nrow(polys0)])
-plot(nb_knn, coords, add=T)
-```
-
-Now, let's link up the cell identities with these graphs -- we want to see how
-mixed in the different cell types are with one another, for example.
+With these shapefiles, we can use geographic plotting tools. For example, this
+plots the immune group for each geometry.
 
 ```{r}
-ggplot(polys0) +
+ggplot(polys) +
   geom_sf(aes(fill=as.factor(immuneGroup))) +
   scale_x_continuous(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0))
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(legend.position = "bottom")
 ```
 
-We can build a graph that summarizes this information.
+# Graph Construction
+
+Sometimes we care less about the locations / sizes of individual cells than
+their connectivity / mixing structure. In the plot below, nodes are located at
+the original cell positions, and contiguity and knn edges are blue and red,
+respectively.
+
+```{r, fig.width=14, fig.height=14}
+nb_contig <- poly2nb(polys, snap=1)
+coords <- polys %>%
+  .[["geometry"]] %>%
+  st_centroid() %>%
+  st_coordinates()
+
+nb_knn <- knn2nb(knearneigh(coords, k = 5))
+plot(polys$geometry[1:nrow(polys)])
+plot(nb_knn, coords, add=T, col="#476a79")
+plot(nb_contig, coords, add=T, col="#97293f")
+```
+
+We can turn this into a more familiar `igraph` object, for access to the usual
+graph manipulation routines.
 
 ```{r}
-library("igraph")
 relations_data <- list()
 for (i in seq_along(nb_contig)) {
   relations_data[[i]] <- tibble(
-    from = polys0$p1_labeledcellData[i],
-    to = polys0$p1_labeledcellData[nb_contig[[i]]]
+    from = polys$cellLabelInImage[i],
+    to = polys$cellLabelInImage[nb_contig[[i]]]
   )
 }
-relations_data <- bind_rows(relations_data)
 
-G <- graph_from_data_frame(relations_data, vertices=polys0)
+relations_data <- bind_rows(relations_data)
+G <- graph_from_data_frame(relations_data, vertices=polys)
 
 plot(
   G,
@@ -108,4 +118,126 @@ plot(
   edge.arrow.size=0,
   vertex.label=NA
 )
+```
+
+# Raster Window Features
+
+With these new data structures, we can compute some cell-level summaries. First,
+let's look at features defined on windows centered around individual cells.
+
+The function below applys `fun` to the buffered window around the cell with
+label `cell_id`. For example, we can use it to get the proportion of each type
+of immune group within a window around that cell. This can be used to define a
+localized cell heterogeneity, for use in downstream analysis.
+
+```{r}
+#' Apply fun to Local Neighborhoods
+#'
+#' @param cell_id The ID of the cell to extract a local neighborhood around.
+#' @param im The raster object giving the pixel-level information about the
+#'   sample.
+#' @param polys A spatial data.frame with a column (geometry) giving the spatial
+#'   geometry of each cell.
+#' @param fun A function that can be applied to a data.frame whose rows are
+#'   pixels and whose columns give features of those pixels (e.g., immune
+#'   group).
+#' @param buffer_radius The size of the window around cell_id, to use to subset
+#'   the raster on which to apply fun.
+#' @param plot_masks If you want to see what the subsets of cells looks like,
+#'   you can use this.
+#' @return result A data_frame mapping the cell to statistics calculated by fun.
+raster_stats_cell <- function(cell_id, im, polys, fun, buffer_radius=90,
+                              plot_masks=TRUE) {
+  sub_poly <- polys %>%
+    filter(cellLabelInImage == cell_id) %>%
+    .[["geometry"]] %>%
+    st_centroid() %>%
+    st_buffer(dist=buffer_radius)
+
+  im_ <- mask(im, as_Spatial(sub_poly))
+  if (plot_masks) {
+    plot(im_)
+  }
+
+  melted_im <- as.matrix(im_) %>%
+    melt(na.rm=TRUE, value.name = "cellLabelInImage") %>%
+    left_join(polys, by = "cellLabelInImage") %>%
+    group_map(fun)
+
+  melted_im[[1]] %>%
+    mutate(cellLabelInImage = cell_id) %>%
+    dplyr::select(cellLabelInImage, everything())
+}
+
+#' Wrapper for Local Statistics
+#'
+#' @param cell_ids A vector of cell IDs on which to apply a function to
+#' @param type Either "raster" or "graph". Specifies the types of neighborhoods
+#'   (image or graph) on which to compute statistics.
+loop_stats <- function(cell_ids, type="raster", ...) {
+  cell_fun <- ifelse(type == "raster", raster_stats_cell, graph_stats_cell)
+
+  result <- list()
+  for (i in seq_along(cell_ids)) {
+    result[[i]] <- cell_fun(cell_ids[i], ...)
+  }
+
+  bind_rows(result)
+}
+```
+
+```{r}
+#' How dense are cells, relative to background?
+backgroundProp <- function(x, ...) {
+  if (nrow(x) == 0) { # case of no neighbors
+    return (data_frame(immuneGroup = NA, props = NA))
+  }
+
+  props <- table(x$cellLabelInImage %in% c(0, 1))
+  data_frame(background = names(props), props = props / sum(props))
+}
+
+#' How many neighbors from each immune group?
+immuneProps <- function(x, ...) {
+  if (nrow(x) == 0) { # case of no neighbors
+    return (data_frame(immuneGroup = NA, props = NA))
+  }
+
+  props <- table(x$immuneGroup, useNA = "ifany")
+  data_frame(immuneGroup = names(props), props = props / sum(props))
+}
+
+cell_ids <- unique(polys$cellLabelInImage)
+loop_stats(cell_ids[1:10], "raster", im, polys, immuneProps)
+loop_stats(cell_ids[1:10], "raster", im, polys, backgroundProp, plot_masks=FALSE)
+```
+
+# Neighbor Features
+
+Next, we ignore the spatial information entirely, and summarize cells according
+to the properties of their neighbors.
+
+```{r}
+#' Apply fun to Graph Neighborhoods
+#'
+#' @param cell_id The ID of the cell to extract a local neighborhood around.
+#' @param G The graph object giving the connections between cell_ids.
+#' @param polys A spatial data.frame with a column (geometry) giving the spatial
+#'   geometry of each cell.
+#' @param fun A function that can be applied to a data.frame whose rows are
+#'   pixels and whose columns give features of those pixels (e.g., immune
+#'   group).
+#' @return result A data_frame mapping the cell to statistics calculated by fun.
+graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
+  ball <- neighbors(G, as.character(cell_id))
+  cell_stats <- polys %>%
+    filter(cellLabelInImage %in% names(ball)) %>%
+    group_map(fun)
+
+  cell_stats[[1]] %>%
+    mutate(cellLabelInImage = cell_id) %>%
+    dplyr::select(cellLabelInImage, everything())
+}
+
+loop_stats(cell_ids[1:10], "graph", G, polys, immuneProps, plot_masks=FALSE)
 ```
