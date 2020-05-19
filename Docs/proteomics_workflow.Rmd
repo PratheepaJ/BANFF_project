@@ -71,7 +71,7 @@ library(RColorBrewer)
 
 ```
 
-Drop the five subjects without any clinical data. We can use Gender variable to identify those subejcts
+Drop the five subjects without any clinical data. We can use Gender variable to identify those subjects
 ```{r}
 # unique(colData(cd45.sce)$patient_id.y[which(is.na(colData(cd45.sce)$Gender))])
 
@@ -108,10 +108,11 @@ rownames(mibi.sce)
 ```
 
 
+
 The 38 proteins can be easily identified by using the binary attribute is_protein from rowData:
 
 ```{r}
-proteins <- rowData(mibi.sce)$is_protein==1
+proteins <- rowData(mibi.sce)$is_protein == 1
 sum(proteins)
 mibi.sce_proteins <- mibi.sce[which(proteins),]
 mibi.sce_proteins
@@ -119,6 +120,7 @@ rownames(mibi.sce_proteins)
 
 rm(mibi.sce)
 ```
+
 
 Cell type information is availble in the columns *tumor_group* and *immune_group* 
 
@@ -151,7 +153,7 @@ rm(mibi.sce_proteins, mibi.sce_immune)
 
 
 
-There are three protein without gene symbol in cd45_sce_dropna so we drop them
+There are three proteins without gene symbol in cd45_sce_dropna so we drop them
 ```{r}
 Proteins_in_cd45 <- !(rowData(cd45_sce_dropna)$hgnc_symbol == "na")
 
