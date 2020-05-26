@@ -33,18 +33,53 @@ library("dplyr")
 library("reshape2")
 library("tibble")
 library("forcats")
+source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
+data_dir <- file.path("..", "Data")
 ```
 
-* merge the different cell type data into one big matrix
-* maybe -- transform to quantiles? I.e., cell x[i, j] would be replaced by the
-  quantile of x[i, j] among all the x[., j]'s. Would make cluster centroids
-  comparable across the devices, though it might break interpretations of
-  covariances between proteins within a single device.
+While we're developing the analysis, we'll use subsampled versions of all the
+data. This loads the masstag and mibi datasets.
+
+```{r}
+load(file.path(data_dir, "masstagSCE.rda"))
+masstag <- data_list("sce")
+load(file.path(data_dir, "mibiSCE.rda"))
+
+masstag <- subsample_experiments(masstag)
+mibi <- subsample_experiments(list(mibi.sce))[[1]]
+```
+
+This next step is optional -- it transforms the original intensities into
+quantiles, to make measures comparable across experiments.
+
+First, just to get intuition, look at some transforms.
+```{r}
+for (j in seq_len(10)) {
+  r <- rank(assay(mibi[j, ])) / ncol(mibi)
+  plot(assay(mibi[j, ]), r)
+}
+```
+
+Now we'll make the transformation. (tk should create an rmarkdown parameter to skip this transformation).
+```{r}
+mibi <- quantile_transform(mibi)
+for (i in seq_along(masstag)) {
+  masstag[[i]] <- quantile_transform(masstag[[i]])
+}
+```
 
 ## Clustering
 
-* k-means on the raw proteins
+* k-means on the raw proteins, separately for each of the cell types.
+ - This means that each cluster will have to be marked by celltype-K, rather
+   than just K.
+ - Another consequence is that we'll have a small set of U-Maps for each
+   patient, one for each cell type
+
+```{r}
+plot(hclust(dist(assay(masstag[[1]]))))
+```
 
 
 ## Clusters vs. Phenotypes
@@ -65,7 +100,7 @@ theme_set(theme_bw() + theme(panel.grid=element_blank()))
 
 * Run a lasso between proportions in different parts of the map and the observed
   phenotypes (say, survival, or cancer grade, or some combination of those)
-  
+
 ## Repeat everything on the other dataset
 
 ## Relating approaches
