@@ -1,0 +1,78 @@
+---
+title: Creating and Relating Atlases
+---
+
+* Single-cell analysis often looks like map making
+* Issue is we don't have common features on our two maps
+  - only a few shared landmarks
+
+* To make this analogy concrete, we're going to look at the data
+* Making atlases
+  - Let's show how you can make these atlases, using clustering
+  - Also using U-Map or PCA
+  - Future: We should also make these using spatial or graph information. So,
+    being close by in on an atlas means that you have similar graph features as
+    well.
+* Interpreting atlases
+  - Is over / under representation in some regions of the map related to good /
+    poor outcomes?
+* Relating atlases
+  - Are there similar interpretations coming from the two different datasets? In
+    what ways are the stories discrepant?
+  - Can we try to map clusters / PCA's onto each other? At the least, we can
+    calculate the distance between centroids, using shared features. A more
+    sophisticated / imputation-like idea is to link the atlases in a more
+    continuous way, using some sort of learned (inverse) function. But let's not
+    worry about that.
+
+## Preparing Data
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+* merge the different cell type data into one big matrix
+* maybe -- transform to quantiles? I.e., cell x[i, j] would be replaced by the
+  quantile of x[i, j] among all the x[., j]'s. Would make cluster centroids
+  comparable across the devices, though it might break interpretations of
+  covariances between proteins within a single device.
+
+## Clustering
+
+* k-means on the raw proteins
+
+
+## Clusters vs. Phenotypes
+
+* Cluster membership vs. cell types
+* % cluster memberships in sample vs. phenotype
+* % cluster memberships in sample vs. combinations of phenotypes
+
+## Dimensionality Reduction
+
+* Run a dimensionality reduction algo on the matrix
+* Plot the resulting map for a couple of samples
+* Overlay the cell types or certain CD's on them
+* Write a function to count the proportions / amounts of cells in different
+  parts of the map
+
+## Reduction vs. Phenotypes
+
+* Run a lasso between proportions in different parts of the map and the observed
+  phenotypes (say, survival, or cancer grade, or some combination of those)
+  
+## Repeat everything on the other dataset
+
+## Relating approaches
+
+* Do you observe similar clusters among better / worse outcome patients?
+  - If so, then gives some basis for performing clustering on MIBI that uses
+    spatial info, and imputing that spatial info onto the Cytof
+* Can you try to "reverse" the lasso from above? From a fixed phenotypic
+  configuration, come up with a distribution over plausible maps, for each of
+  the two types of data.
