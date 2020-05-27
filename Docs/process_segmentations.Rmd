@@ -55,7 +55,7 @@ colnames(polys)[1] <- "cellLabelInImage"
 This will join polygons that are neighbors. Notice that there is a thin border
 between cells, so we'll ignore that using the `snap` argument in `poly2nb`.
 
-```{r fig.width=14, fig.height=14}
+```{r}
 cell_data <- read_csv(file.path(data_dir, "cellData.csv")) %>%
   filter(SampleID == sample_id)
 
@@ -68,7 +68,7 @@ polys <- polys %>%
 With these shapefiles, we can use geographic plotting tools. For example, this
 plots the immune group for each geometry.
 
-```{r}
+```{r fig.width=14, fig.height=14}
 ggplot(polys) +
   geom_sf(aes(fill=as.factor(immuneGroup))) +
   scale_x_continuous(expand = c(0, 0)) +
