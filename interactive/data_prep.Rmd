@@ -44,8 +44,25 @@ polys <- polys %>%
 We'll want to order the cells according to a clustering.
 
 ```{r}
-channels <- setdiff(colnames(polys), c("cellLabelInImage", "SampleID", "cellSize", "Background", "cell_cluster", "tumorCluster", "Group", "immuneCluster", "immuneGroup", "geometry"))
-x <- polys[, channels]
-polys$hm_order <- hclust(dist(x))$order
-st_write(polys, file.path(data_dir, "..", "polys.geojson"))
+channels <- setdiff(colnames(polys), c("cellLabelInImage", "SampleID", "cellSize", "Background", "tumorYN", "cell_cluster", "tumorCluster", "Group", "immuneCluster", "immuneGroup", "geometry"))
+x <- polys[, channels] %>%
+  as.data.frame() %>%
+  dplyr::select(-geometry)
+
+for (j in seq_len(ncol(x))) {
+  x[, j] <- rank(x[, j]) / nrow(x)
+}
+
+x$hm_order <- hclust(dist(x))$order
+x$cellLabelInImage <- polys$cellLabelInImage
+
+mx <- x %>%
+  melt(id.vars = c("cellLabelInImage", "hm_order"), variable.name = "channel")
+
+jsonlite::write_json(mx, file.path("..", "interactive", "map-hm", "assets", "channels.json"))
+```
+
+```{r}
+## st_write(polys, file.path(data_dir, "..", "polys.geojson"))
+st_write(polys, file.path("..", "interactive", "map-hm", "assets", "polys.geojson"))
 ```

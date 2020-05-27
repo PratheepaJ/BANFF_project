@@ -1,8 +1,24 @@
-const root = document.getElementById('root');
 import * as f from './funs';
+import * as d3s from 'd3-selection';
+import * as d3sm from 'd3-selection-multi';
+import './style.css';
 
-f.initializeCells(root);
-f.initializeHeatmap(root);
+d3s.select("#root")
+  .append("svg")
+  .attrs({
+    id: "svg",
+    width: 900,
+    height: 500
+  });
+
+d3s.select("#svg")
+  .selectAll("g")
+  .data(["cells", "hm"]).enter()
+  .append("g")
+  .attr("id", (d) => d);
+
+f.initializeCells("#cells");
+f.initializeHeatmap("#hm");
 
 // This is needed for Hot Module Replacement
 if (module.hot) {
