@@ -1,5 +1,5 @@
 import * as d3s from 'd3-selection';
-import polys from '../assets/polys_small.json';
+import polys from '../assets/polys.json';
 import channels from '../assets/channels.json';
 import { geoPath, geoIdentity } from 'd3-geo';
 import { scales, state } from './globals';
@@ -39,7 +39,7 @@ export function initializeScatter(root) {
       "stroke-width": 0.1,
       class: "scatterCircle"
     })
-    .on("mouseover", hmOver);
+    .on("mouseover", scatterOver);
 }
 
 function cellOver(data) {
@@ -54,7 +54,7 @@ function cellOver(data) {
   }
 }
 
-function hmOver(data) {
+function scatterOver(data) {
   const curState = new Set([...state.cells, ...state.hm]);
   curState.add(data.cellLabelInImage);
   updateHighlighted(curState);
@@ -77,6 +77,6 @@ function updateHighlighted(curState) {
   d3s.select('#cells')
     .selectAll('.cellPath')
     .attrs({
-      "stroke-width": (d) => curState.has(d.properties.cellLabelInImage) ? 1 : 0.2
+      "stroke-width": (d) => curState.has(d.properties.cellLabelInImage) ? 1 : 0.1
     });
 }
