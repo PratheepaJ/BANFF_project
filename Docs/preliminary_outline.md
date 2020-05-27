@@ -98,6 +98,8 @@ biplots. Alternatively, we can split the data and study the stability of our
 attributions across subsets. If we find the same feature useful on a new split,
 then we have higher confidence that what we're picking up on is real.
 
+## Multiview Analysis: Imputation / Prediction
+
 Second, let's consider what some of the tangible products for the multi-table
 case look like. In an ideal world, we'd be able to generate the high-resolution
 features from just low-resolution measurements. That in fact seems to be the
@@ -120,6 +122,20 @@ without the proxy), then that's evidence that integrating the MIBI proxies into
 the TOF data is a worthwhile exercise. If it's not any better, then I'd be
 comfortable running two separate single-table analysis (though, see comments in
 the last paragraph below).
+
+## Multiview Analysis: Linking
+
+* Imputation is quite a bit of machinery to implement, and would be helpful to
+  have some indications that the direction has promise
+* We can try informally linking the conclusions from the two types of data,
+  without all this machinery
+  - E.g., you can get clusters from each type of dataset
+  - Can you map the clusters onto one another? In theory, you could link them
+    based on values in shared features
+  - Is enrichment of clusters within particular phenotypes consistent across the
+    two studies?
+
+## Spatial Co-location
 
 As an aside, there is a particular outcome using only the MIBI data that might
 be special interest, and which seems way easier to obtain. The organizers are

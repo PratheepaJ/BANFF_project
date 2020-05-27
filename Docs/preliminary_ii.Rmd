@@ -75,8 +75,16 @@ col_union <- col_union[sample_ix, ]
 
 ```{r eval = FALSE}
 saveRDS(X, file.path(data_dir, "mass_spec_sample.rds"))
-write_csv(col_union, file.path(data_dir, "../Data/cell_info_sample.csv"))
-write_csv(row_union, file.path(data_dir, "../Data/marker_info_sample.csv"))
+write_csv(col_union, file.path(data_dir, "../Data/mass_tag_cell_info.csv"))
+write_csv(row_union, file.path(data_dir, "../Data/mass_tag_marker_info.csv"))
+```
+
+For future analysis, do note that even though the cells can now be mapped in the
+same space, there will be very big differences between cell types, since
+different cell types don't have the same markers,
+
+```{r}
+image(X[1:20, ])
 ```
 
 # Cell-Level [Mass Spec]
