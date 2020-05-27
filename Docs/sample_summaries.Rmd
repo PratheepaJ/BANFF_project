@@ -28,12 +28,14 @@ title: Creating and Relating Atlases
 ## Preparing Data
 
 ```{r}
-library("ggplot2")
 library("dplyr")
-library("reshape2")
-library("tidyr")
-library("tibble")
 library("forcats")
+library("ggplot2")
+library("plotly")
+library("reshape2")
+library("tibble")
+library("tidyr")
+library("umap")
 source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 data_dir <- file.path("..", "Data")
@@ -207,7 +209,17 @@ ggplot(masstag_pheno) +
   parts of the map
 
 ```{r}
+conf <- umap.defaults
+conf$n_components <- 4
+masstag_dimred <- lapply(masstag, function(x) { umap(t(assay(x)), config = conf) })
+```
 
+```{r}
+l <- as_tibble(masstag_dimred[[1]]$layout)
+plot_ly(
+  x = ~V1, y = ~V2, z = ~V3, marker = list(color = ~V4),
+  size = 0.1, alpha = 0.3, data = l, type = "scatter3d"
+)
 ```
 
 
