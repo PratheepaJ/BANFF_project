@@ -3,5 +3,7 @@
     stroke: #0c0c0c;
 }
 
-.hmCell {
+.scatterCircle {
+    r: 2;
+    stroke: #0c0c0c;
 }

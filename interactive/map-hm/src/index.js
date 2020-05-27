@@ -13,12 +13,17 @@ d3s.select("#root")
 
 d3s.select("#svg")
   .selectAll("g")
-  .data(["cells", "hm"]).enter()
+  .data(["cells", "scatter"]).enter()
   .append("g")
   .attr("id", (d) => d);
 
+d3s.select("#scatter")
+  .attrs({
+    transform: "translate(${scales.range()[1]}, 10)"
+  });
+
 f.initializeCells("#cells");
-f.initializeHeatmap("#hm");
+f.initializeScatter("#scatter");
 
 // This is needed for Hot Module Replacement
 if (module.hot) {
