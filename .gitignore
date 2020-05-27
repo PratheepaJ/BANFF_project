@@ -4,3 +4,5 @@ Docs/*.html
 Docs/proteomics_posted_by_organizers.Rmd
 .Rhistory
 .gitignore
+*.json
+*package-lock*

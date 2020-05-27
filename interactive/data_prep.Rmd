@@ -1,0 +1,76 @@
+---
+title: Prepare Data for Vis
+params:
+  sample_id: 5
+---
+
+```{r}
+library("ggplot2")
+library("igraph")
+library("raster")
+library("readr")
+library("spdep")
+library("stars")
+library("stringr")
+library("tidyr")
+library("umap")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+First, get polygon data. Very similar to what's in `process_segmentations.Rmd`,
+probably could be abstracted into separate functions.
+
+```{r}
+sample_id <- params$sample_id
+data_dir <- file.path("..", "Data", "TNBC_shareCellData")
+f <- list.files(data_dir, str_interp("p${sample_id}_"), full.names = TRUE)
+im <- raster(f)
+## im <- crop(im, extent(im, 0, 1000, 0, 1000)) # uncomment to test on cropped data
+
+polys <- st_as_stars(im) %>%
+  st_as_sf(merge = TRUE) %>%
+  st_cast("POLYGON")
+colnames(polys)[1] <- "cellLabelInImage"
+
+cell_data <- read_csv(file.path(data_dir, "cellData.csv")) %>%
+  filter(SampleID == sample_id) %>%
+  unite(cell_cluster, c("tumorCluster", "immuneCluster"), remove=F)
+
+polys <- polys %>%
+  inner_join(cell_data) %>%
+  group_by(cellLabelInImage) %>% # some regions get split into two adjacent polys --> merge
+  summarise_all(first)
+```
+
+We'll want to order the cells according to a clustering.
+
+```{r}
+channels <- setdiff(colnames(polys), c("cellLabelInImage", "SampleID", "cellSize", "Background", "tumorYN", "cell_cluster", "tumorCluster", "Group", "immuneCluster", "immuneGroup", "geometry"))
+x <- polys[, channels] %>%
+  as.data.frame() %>%
+  dplyr::select(-geometry)
+
+for (j in seq_len(ncol(x))) {
+  x[, j] <- rank(x[, j]) / nrow(x)
+}
+
+dimred <- umap(x) %>%
+  .[["layout"]]
+
+dimred <- dimred %>%
+  as.data.frame() %>%
+  mutate(
+    hm_order = hclust(dist(dimred))$order,
+    cellLabelInImage = polys$cellLabelInImage,
+    tumorYN = polys$tumorYN,
+    tumorCluster = polys$tumorCluster,
+    immuneGroup = polys$immuneGroup
+  )
+
+jsonlite::write_json(dimred, file.path("..", "interactive", "map-hm", "assets", "channels.json"))
+```
+
+```{r}
+## st_write(polys, file.path(data_dir, "..", "polys.geojson"))
+st_write(polys, file.path("..", "interactive", "map-hm", "assets", "polys.geojson"))
+```
