@@ -7,7 +7,7 @@ d3s.select("#root")
   .append("svg")
   .attrs({
     id: "svg",
-    width: 900,
+    width: 700,
     height: 500
   });
 

@@ -24,7 +24,7 @@ sample_id <- params$sample_id
 data_dir <- file.path("..", "Data", "TNBC_shareCellData")
 f <- list.files(data_dir, str_interp("p${sample_id}_"), full.names = TRUE)
 im <- raster(f)
-im <- crop(im, extent(im, 0, 250, 0, 250)) # uncomment to test on cropped data
+im <- crop(im, extent(im, 0, 1000, 0, 1000)) # uncomment to test on cropped data
 
 polys <- st_as_stars(im) %>%
   st_as_sf(merge = TRUE) %>%
@@ -53,11 +53,24 @@ for (j in seq_len(ncol(x))) {
   x[, j] <- rank(x[, j]) / nrow(x)
 }
 
-x$hm_order <- hclust(dist(x))$order
-x$cellLabelInImage <- polys$cellLabelInImage
+library("umap")
+conf <- umap.defaults
+conf$n_components <- 6
+dimred <- umap(x, config = conf) %>%
+  .[["layout"]]
 
-mx <- x %>%
-  melt(id.vars = c("cellLabelInImage", "hm_order"), variable.name = "channel")
+dimred <- dimred %>%
+  as.data.frame() %>%
+  mutate(
+    hm_order = hclust(dist(dimred))$order,
+    cellLabelInImage = polys$cellLabelInImage,
+    tumorYN = polys$tumorYN,
+    tumorCluster = polys$tumorCluster,
+    immuneGroup = polys$immuneGroup
+  )
+
+mx <- dimred %>%
+  melt(measure.vars = paste0("V", seq_len(conf$n_components)))
 
 jsonlite::write_json(mx, file.path("..", "interactive", "map-hm", "assets", "channels.json"))
 ```
