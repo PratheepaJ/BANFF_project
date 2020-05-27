@@ -12,3 +12,8 @@ export const scales = {
   hmX: d3sc.scaleBand().domain(channels).range([500, 900]),
   hmFill: d3sc.scaleLinear().domain([0, 0.5, 1]).range(["white", "grey", "black"])
 };
+
+export const state = {
+  cells: new Set([]),
+  hm: new Set([])
+};
