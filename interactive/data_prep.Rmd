@@ -11,8 +11,9 @@ library("raster")
 library("readr")
 library("spdep")
 library("stars")
-library("tidyr")
 library("stringr")
+library("tidyr")
+library("umap")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
@@ -24,7 +25,7 @@ sample_id <- params$sample_id
 data_dir <- file.path("..", "Data", "TNBC_shareCellData")
 f <- list.files(data_dir, str_interp("p${sample_id}_"), full.names = TRUE)
 im <- raster(f)
-im <- crop(im, extent(im, 0, 1000, 0, 1000)) # uncomment to test on cropped data
+## im <- crop(im, extent(im, 0, 1000, 0, 1000)) # uncomment to test on cropped data
 
 polys <- st_as_stars(im) %>%
   st_as_sf(merge = TRUE) %>%
@@ -53,10 +54,7 @@ for (j in seq_len(ncol(x))) {
   x[, j] <- rank(x[, j]) / nrow(x)
 }
 
-library("umap")
-conf <- umap.defaults
-conf$n_components <- 6
-dimred <- umap(x, config = conf) %>%
+dimred <- umap(x) %>%
   .[["layout"]]
 
 dimred <- dimred %>%
@@ -69,10 +67,7 @@ dimred <- dimred %>%
     immuneGroup = polys$immuneGroup
   )
 
-mx <- dimred %>%
-  melt(measure.vars = paste0("V", seq_len(conf$n_components)))
-
-jsonlite::write_json(mx, file.path("..", "interactive", "map-hm", "assets", "channels.json"))
+jsonlite::write_json(dimred, file.path("..", "interactive", "map-hm", "assets", "channels.json"))
 ```
 
 ```{r}
