@@ -1,5 +1,7 @@
 ---
 title: Mapping between Embeddings
+params:
+  qsize: 500
 ---
 
 _Goal_: Map mass-spec measurements to plausible spatial expression patterns, based
@@ -48,8 +50,88 @@ library("dplyr")
 library("reshape2")
 library("tibble")
 library("forcats")
+library("raster")
+library("tidyr")
+library("stringr")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
+
+Loading data...
+
+```{r}
+data_dir <- file.path("..", "Data")
+load(file.path(data_dir, "mibiSCE.rda"))
+tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", full=T)
+sample_names <- str_extract(tiff_paths, "[0-9]+")
+
+summary(mibi.sce)
+glimpse(colData(mibi.sce))
+```
+
+Now, we'll start implementing the outline proposed above, using simplest
+components that we can find. We'll improve the parts that seem especially weak
+in the second pass.
+
+Also for the sake of simplicity, we'll work on subsamples of cells. We won't
+randomly sample though, since that would lose interesting spatial variation --
+instead we'll extract small quadrants from the full images.
+
+# Subsampling
+
+We'll loop over all the tiffs and extract the `r param$qsize` $\times$
+`r params$qsize` top left quadrant from each image.
+
+```{r}
+ims <- list()
+for (i in seq_along(tiff_paths)) {
+  print(paste0(i, "/", length(tiff_paths)))
+  r <- raster(tiff_paths[[i]])
+  ims[[i]] <- crop(r, extent(1, params$qsize, 1, params$qsize))
+}
+
+# just a peek
+for (i in sample(seq_along(ims), 10)) {
+  plot(ims[[i]])
+}
+
+names(ims) <- sample_names
+cur_cells <- sapply(ims, raster::unique) %>%
+  melt() %>%
+  dplyr::rename(cellLabelInImage = "value", SampleID = "L1") %>%
+  unite(sample_by_cell, SampleID, cellLabelInImage, remove=F)
+
+colData(mibi.sce)$sample_by_cell <- colData(mibi.sce) %>%
+                  as.data.frame() %>%
+                  dplyr::select(SampleID, cellLabelInImage) %>%
+                  unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+                  .[["sample_by_cell"]]
+
+mibi.sce <- mibi.sce[, colData(mibi.sce)$sample_by_cell %in% cur_cells$sample_by_cell]
+```
+
+# Embeddings
+
+Now, let's extract some features on which to perform the joint embedding. We'll
+transform and reweight the columns, to make the two sets of features more
+comparable. First, for transformation, we'll convert antigen expression values
+to ranks and then threshold.
+
+```{r}
+x <- t(assay(mibi.sce))
+for (j in seq_len(ncol(x))) {
+  x[, j] <- pmin(rank(x[, j], ties = "random"), params$max_rank) / params$max_rank
+}
+```
+
+* get features from process segmentations
+* center and standardize all
+* run u-map after reweighting
+
+
+# Cells $\to$ Samples
+
+
+# Guessing the Embedding
 
 [^1]: We can try predicting different sample characteristics from the
     embeddings, for example. It seems like what people do by eye anyways (trying
