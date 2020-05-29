@@ -15,7 +15,7 @@ unify_col_data <- function(col_data_list) {
     mutate_at(vars(-matches("Age|percent|Score")), as_factor)
 }
 
-subsample_experiments <- function(x_list, p_keep = 0.01) {
+subsample_experiments <- function(x_list, p_keep = 0.05) {
   for (i in seq_along(x_list)) {
     D <- ncol(x_list[[i]])
     sample_ix <- sample(D, D * p_keep, replace=FALSE)
