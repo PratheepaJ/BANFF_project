@@ -1,0 +1,56 @@
+---
+title: Mapping between Embeddings
+---
+
+_Goal_: Map mass-spec measurements to plausible spatial expression patterns, based
+on MIBI-ToF measurements, and provide some sense of uncertainty in the estimate.
+
+_Outline_:
+
+* For MIBI data, derive cell-level embeddings, based both on the cells' antigen
+  expression levels and local spatial ecosystem.
+    - This is the part of the analysis that is the most open-ended -- there are
+    many ways to build embeddings from either quantitative matrices or images /
+    graphs, and we also have to decide how to combine them.
+    - We'll start with something simple: U-Map on quantitative and derived
+      spatial features, with a parameter trading off the relative weights of the
+      two tables.
+    - Would be very interesting to try image (autoencoder) or graph (graph nn)
+      features.
+* Summarize MIBI samples based on these cell-level features. The idea is to
+  cluster the embeddings and summarize a sample based on the fraction of cells
+  that belong to each cluster.
+* Relate mass-spec and MIBI measurements by learning a mapping from common
+  features (9 shared antigens and overlapping patient characteristics) to the
+  location on the embedding.
+  - Our predicted spatial expression for a cytof sample is the spatial
+    expression pattern associated with that region in the predicted embedding
+    space.
+  - We can gauge our ability to actually perform spatial expression imputation
+    by (1) our prediction ability, from test mibitof samples to their true
+    embeddings, and (2) a proportion-of-variance like quantity on the
+    original embeddings[^1].
+
+_Themes_:
+* Try assembling easily re-usable components, and understanding their behavior
+  when combined. This seems more broadly useful than trying to come up with a
+  single model that cannot be reused elsewhere.
+* The notion of a "sampling unit" is hierarchical (at least, it's not clear
+  cut). We need to think of sampling and variation at both the patient and
+  cellular level.
+* The dichotomy between ML and stats is artificial, especially in applications
+  like this, which are heavy in both non-tabular data and scientific questions.
+  Liberally use methods from both disciplines.
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+[^1]: We can try predicting different sample characteristics from the
+    embeddings, for example. It seems like what people do by eye anyways (trying
+    to tell whether known group separate).
