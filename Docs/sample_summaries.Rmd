@@ -92,8 +92,8 @@ for (i in seq_along(masstag)) {
    patient, one for each cell type
 
 ```{r}
-heatmap(assay(masstag[[1]]))
-heatmap(assay(masstag[[2]]))
+heatmap(assay(masstag[[1]][, 1:500]))
+heatmap(assay(masstag[[2]][, 1:500]))
 ```
 
 ```{r}
@@ -107,7 +107,6 @@ for (group in unique(mibi_types)) {
   mibi_clusters[[group]] <- kmeans(cur_x, centers=5)
 }
 
-mibi_clusters
 ```
 
 We can visualize the centroids for one of the clusterings. We should do this for
@@ -122,7 +121,7 @@ ggplot(centroids_df) +
     aes(x = channel, y = cluster, fill = value)
   ) +
   scale_fill_gradient(low = "white", high = "black") +
-  theme(axis.text.x = element_text(angle = 0))
+  theme(axis.text.x = element_text(angle = 90))
 
 cluster_hist_data <- assay(masstag[[1]]) %>%
   t() %>%

@@ -1,0 +1,221 @@
+---
+title: Mapping between Embeddings
+params:
+  qsize: 500
+  max_rank: 2000
+---
+
+_Goal_: Map mass-spec measurements to plausible spatial expression patterns, based
+on MIBI-ToF measurements, and provide some sense of uncertainty in the estimate.
+
+_Outline_:
+
+* For MIBI data, derive cell-level embeddings, based both on the cells' antigen
+  expression levels and local spatial ecosystem.
+    - This is the part of the analysis that is the most open-ended -- there are
+    many ways to build embeddings from either quantitative matrices or images /
+    graphs, and we also have to decide how to combine them.
+    - We'll start with something simple: U-Map on quantitative and derived
+      spatial features, with a parameter trading off the relative weights of the
+      two tables.
+    - Would be very interesting to try image (autoencoder) or graph (graph nn)
+      features.
+* Summarize MIBI samples based on these cell-level features. The idea is to
+  cluster the embeddings and summarize a sample based on the fraction of cells
+  that belong to each cluster.
+* Relate mass-spec and MIBI measurements by learning a mapping from common
+  features (9 shared antigens and overlapping patient characteristics) to the
+  location on the embedding.
+  - Our predicted spatial expression for a cytof sample is the spatial
+    expression pattern associated with that region in the predicted embedding
+    space.
+  - We can gauge our ability to actually perform spatial expression imputation
+    by (1) our prediction ability, from test mibitof samples to their true
+    embeddings, and (2) a proportion-of-variance like quantity on the
+    original embeddings[^1].
+
+_Themes_:
+
+* Try assembling easily re-usable components, and understanding their behavior
+  when combined. This seems more broadly useful than trying to come up with a
+  single model that cannot be reused elsewhere.
+* The notion of a "sampling unit" is hierarchical (at least, it's not clear
+  cut). We need to think of sampling and variation at both the patient and
+  cellular level.
+* The dichotomy between ML and stats is artificial, especially in applications
+  like this, which are heavy in both non-tabular data and scientific questions.
+  Liberally use methods from both disciplines.
+
+```{r}
+library("dplyr")
+library("forcats")
+library("ggplot2")
+library("raster")
+library("reshape2")
+library("stars")
+library("stringr")
+library("tibble")
+library("tidyr")
+source("preprocessing.R")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+Loading data...
+
+```{r}
+data_dir <- file.path("..", "Data")
+load(file.path(data_dir, "mibiSCE.rda"))
+tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", full=T)
+sample_names <- str_extract(tiff_paths, "[0-9]+")
+
+summary(mibi.sce)
+colData(mibi.sce)$cell_type <- cell_type(mibi.sce)
+glimpse(colData(mibi.sce))
+```
+
+Now, we'll start implementing the outline proposed above, using simplest
+components that we can find. We'll improve the parts that seem especially weak
+in the second pass.
+
+Also for the sake of simplicity, we'll work on subsamples of cells. We won't
+randomly sample though, since that would lose interesting spatial variation --
+instead we'll extract small quadrants from the full images.
+
+# Subsampling
+
+We'll loop over all the tiffs and extract the `r params$qsize` $\times$
+`r params$qsize` top left quadrant from each image.
+
+```{r}
+ims <- list()
+for (i in seq_along(tiff_paths)) {
+  print(paste0(i, "/", length(tiff_paths)))
+  r <- raster(tiff_paths[[i]])
+  ims[[i]] <- crop(r, extent(1, params$qsize, 1, params$qsize))
+}
+
+names(ims) <- sample_names
+cur_cells <- sapply(ims, raster::unique) %>%
+  melt() %>%
+  dplyr::rename(cellLabelInImage = "value", SampleID = "L1") %>%
+  unite(sample_by_cell, SampleID, cellLabelInImage, remove=F)
+
+colData(mibi.sce)$sample_by_cell <- colData(mibi.sce) %>%
+                  as.data.frame() %>%
+                  dplyr::select(SampleID, cellLabelInImage) %>%
+                  unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+                  .[["sample_by_cell"]]
+
+mibi.sce <- mibi.sce[, colData(mibi.sce)$sample_by_cell %in% cur_cells$sample_by_cell]
+```
+
+# Embeddings
+
+Now, let's extract some features on which to perform the joint embedding. We'll
+transform and reweight the columns, to make the two sets of features more
+comparable. First, for transformation, we'll convert antigen expression values
+to ranks and then threshold.
+
+```{r}
+mibi.sce <- quantile_transform(mibi.sce, params$max_rank)
+x <- t(assay(mibi.sce))
+x_order <- hclust(dist(t(x)))$order
+pairs(x[, x_order[1:6]], col = rgb(0, 0, 0, 0.5), cex=0.1)
+```
+
+Next, we'll extract some features from the spatial data. Note that some cells
+seem to appear in the raster but not in the `colDatsome cells seem to appear in
+the raster but not in the `colData`. This seems weird, and is worth looking
+into, but for now I'm going to just innerJoin to ignore that.
+
+```{r}
+# polygonize each raster
+col_df <- as.data.frame(colData(mibi.sce))
+polys <- list()
+for (i in seq_along(ims)) {
+  polys[[i]] <- polygonize(ims[[i]]) %>%
+    mutate(SampleID = as.numeric(sample_names[i])) %>%
+    unite(sample_by_cell, SampleID, cellLabelInImage, remove=FALSE) %>%
+    inner_join(col_df, by = c("sample_by_cell", "SampleID", "cellLabelInImage"))
+}
+
+# a little plot
+polys_df <- do.call(rbind, polys)
+ggplot(polys_df %>% filter(!is.na(cellSize),  SampleID %in% 1:16)) +
+  geom_sf(aes(fill = as.factor(tumorYN))) +
+  facet_wrap(Survival_days_capped_2016.1.1~SampleID) +
+  theme(legend.position = "bottom")
+
+# extract some basic features
+spatial_stats <- list()
+for (i in seq_along(polys)) {
+  print(paste0("processing sample ", i, "/", length(polys)))
+  cell_ids <- unique(polys[[i]]$cellLabelInImage)
+  spatial_stats[[i]] <- loop_stats(cell_ids, "raster", ims[[i]], polys[[i]], typeProps, plot=F)
+}
+
+names(spatial_stats) <- sample_names
+spatial_stats <- bind_rows(spatial_stats, .id = "SampleID") %>%
+  unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+  dcast(sample_by_cell ~ cellType, fill=0) %>%
+  rename(`NA` = "background")
+```
+
+Now, we'll standardize these features and learn some embeddings.
+
+```{r}
+# standardize features between the two tables
+x <- t(assay(mibi.sce)) %>%
+  as_tibble()
+x$sample_by_cell <- col_df$sample_by_cell
+x <- x %>%
+  mutate_at(vars(-sample_by_cell), function(u) (u - min(u)) / diff(range(u))) %>%
+  mutate_at(vars(-sample_by_cell), function(u) u / sqrt(ncol(x)))
+
+y <- spatial_stats %>%
+  mutate_at(vars(-sample_by_cell), function(u) (u - min(u)) / diff(range(u))) %>%
+  mutate_at(vars(-sample_by_cell), function(u) u / sqrt(ncol(y))) %>%
+  select_if(function(u) !all(is.na(u)))
+
+z <- x %>% inner_join(y, by = "sample_by_cell")
+z_mat <- z %>%
+  dplyr::select(-sample_by_cell) %>%
+  as.matrix()
+heatmap(z_mat[1:450, ])
+
+# learning embeddings across the two tables
+embeddings <- umap(z_mat)
+embeddings_df <- embeddings$layout %>%
+  as_tibble(.name_repair = "universal") %>%
+  rename(`...1` = "l1", `...2` = "l2") %>%
+  mutate(sample_by_cell = z$sample_by_cell) %>%
+  left_join(col_df) %>%
+  left_join(z)
+```
+
+We'll plot the embeddings we just made, against some of the derived features.
+
+```{r}
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = cell_type)) +
+  facet_wrap(~ SampleID) +
+  ggtitle("Cell Types")
+
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = Fe)) +
+  facet_wrap(~ SampleID)
+
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = sqrt(Macrophages))) +
+  facet_wrap(~ SampleID) +
+  ggtitle("Prop. Neighbors are Macrophages")
+```
+
+# Cells $\to$ Samples
+
+
+# Guessing the Embedding
+
+[^1]: We can try predicting different sample characteristics from the
+    embeddings, for example. It seems like what people do by eye anyways (trying
+    to tell whether known group separate).
