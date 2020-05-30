@@ -28,6 +28,7 @@ library("spdep")
 library("stars")
 library("stringr")
 library("reshape2")
+source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
@@ -131,84 +132,8 @@ of immune group within a window around that cell. This can be used to define a
 localized cell heterogeneity, for use in downstream analysis.
 
 ```{r}
-#' Apply fun to Local Neighborhoods
-#'
-#' @param cell_id The ID of the cell to extract a local neighborhood around.
-#' @param im The raster object giving the pixel-level information about the
-#'   sample.
-#' @param polys A spatial data.frame with a column (geometry) giving the spatial
-#'   geometry of each cell.
-#' @param fun A function that can be applied to a data.frame whose rows are
-#'   pixels and whose columns give features of those pixels (e.g., immune
-#'   group).
-#' @param buffer_radius The size of the window around cell_id, to use to subset
-#'   the raster on which to apply fun.
-#' @param plot_masks If you want to see what the subsets of cells looks like,
-#'   you can use this.
-#' @return result A data_frame mapping the cell to statistics calculated by fun.
-raster_stats_cell <- function(cell_id, im, polys, fun, buffer_radius=90,
-                              plot_masks=TRUE) {
-  sub_poly <- polys %>%
-    filter(cellLabelInImage == cell_id) %>%
-    .[["geometry"]] %>%
-    st_centroid() %>%
-    st_buffer(dist=buffer_radius)
-
-  im_ <- mask(im, as_Spatial(sub_poly))
-  if (plot_masks) {
-    plot(im_)
-  }
-
-  melted_im <- as.matrix(im_) %>%
-    melt(na.rm=TRUE, value.name = "cellLabelInImage") %>%
-    left_join(polys, by = "cellLabelInImage") %>%
-    group_map(fun)
-
-  melted_im[[1]] %>%
-    mutate(cellLabelInImage = cell_id) %>%
-    dplyr::select(cellLabelInImage, everything())
-}
-
-#' Wrapper for Local Statistics
-#'
-#' @param cell_ids A vector of cell IDs on which to apply a function to
-#' @param type Either "raster" or "graph". Specifies the types of neighborhoods
-#'   (image or graph) on which to compute statistics.
-loop_stats <- function(cell_ids, type="raster", ...) {
-  cell_fun <- ifelse(type == "raster", raster_stats_cell, graph_stats_cell)
-
-  result <- list()
-  for (i in seq_along(cell_ids)) {
-    result[[i]] <- cell_fun(cell_ids[i], ...)
-  }
-
-  bind_rows(result)
-}
-```
-
-```{r}
 #' How dense are cells, relative to background?
-backgroundProp <- function(x, ...) {
-  if (nrow(x) == 0) { # case of no neighbors
-    return (data_frame(immuneGroup = NA, props = NA))
-  }
-
-  props <- table(x$cellLabelInImage %in% c(0, 1))
-  data_frame(background = names(props), props = props / sum(props))
-}
-
-#' How many neighbors from each immune group?
-immuneProps <- function(x, ...) {
-  if (nrow(x) == 0) { # case of no neighbors
-    return (data_frame(immuneGroup = NA, props = NA))
-  }
-
-  props <- table(x$immuneGroup, useNA = "ifany")
-  data_frame(immuneGroup = names(props), props = props / sum(props))
-}
-
 cell_ids <- unique(polys$cellLabelInImage)
-loop_stats(cell_ids[1:10], "raster", im, polys, immuneProps)
 loop_stats(cell_ids[1:10], "raster", im, polys, backgroundProp, plot_masks=FALSE)
 ```
 
@@ -218,26 +143,5 @@ Next, we ignore the spatial information entirely, and summarize cells according
 to the properties of their neighbors.
 
 ```{r}
-#' Apply fun to Graph Neighborhoods
-#'
-#' @param cell_id The ID of the cell to extract a local neighborhood around.
-#' @param G The graph object giving the connections between cell_ids.
-#' @param polys A spatial data.frame with a column (geometry) giving the spatial
-#'   geometry of each cell.
-#' @param fun A function that can be applied to a data.frame whose rows are
-#'   pixels and whose columns give features of those pixels (e.g., immune
-#'   group).
-#' @return result A data_frame mapping the cell to statistics calculated by fun.
-graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
-  ball <- neighbors(G, as.character(cell_id))
-  cell_stats <- polys %>%
-    filter(cellLabelInImage %in% names(ball)) %>%
-    group_map(fun)
-
-  cell_stats[[1]] %>%
-    mutate(cellLabelInImage = cell_id) %>%
-    dplyr::select(cellLabelInImage, everything())
-}
-
-loop_stats(cell_ids[1:10], "graph", G, polys, immuneProps, plot_masks=FALSE)
+loop_stats(cell_ids[1:10], "graph", G, polys, backgroundProp, plot_masks=FALSE)
 ```
