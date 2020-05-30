@@ -35,6 +35,7 @@ _Outline_:
     original embeddings[^1].
 
 _Themes_:
+
 * Try assembling easily re-usable components, and understanding their behavior
   when combined. This seems more broadly useful than trying to come up with a
   single model that cannot be reused elsewhere.
@@ -46,15 +47,15 @@ _Themes_:
   Liberally use methods from both disciplines.
 
 ```{r}
-library("ggplot2")
 library("dplyr")
-library("reshape2")
-library("tibble")
 library("forcats")
+library("ggplot2")
 library("raster")
-library("tidyr")
-library("stringr")
+library("reshape2")
 library("stars")
+library("stringr")
+library("tibble")
+library("tidyr")
 source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
