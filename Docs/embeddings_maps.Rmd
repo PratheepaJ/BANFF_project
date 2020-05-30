@@ -122,8 +122,10 @@ x_order <- hclust(dist(t(x)))$order
 pairs(x[, x_order[1:6]], col = rgb(0, 0, 0, 0.5), cex=0.1)
 ```
 
-Next, we'll extract some features from the spatial data. Note that there are NAs
-for border regions.
+Next, we'll extract some features from the spatial data. Note that some cells
+seem to appear in the raster but not in the `colDatsome cells seem to appear in
+the raster but not in the `colData`. This seems weird, and is worth looking
+into, but for now I'm going to just innerJoin to ignore that.
 
 ```{r}
 # polygonize each raster
