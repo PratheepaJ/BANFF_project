@@ -82,7 +82,7 @@ instead we'll extract small quadrants from the full images.
 
 # Subsampling
 
-We'll loop over all the tiffs and extract the `r param$qsize` $\times$
+We'll loop over all the tiffs and extract the `r params$qsize` $\times$
 `r params$qsize` top left quadrant from each image.
 
 ```{r}
