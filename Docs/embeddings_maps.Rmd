@@ -2,6 +2,7 @@
 title: Mapping between Embeddings
 params:
   qsize: 500
+  max_rank: 2000
 ---
 
 _Goal_: Map mass-spec measurements to plausible spatial expression patterns, based
@@ -53,6 +54,8 @@ library("forcats")
 library("raster")
 library("tidyr")
 library("stringr")
+library("stars")
+source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
@@ -65,6 +68,7 @@ tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", fu
 sample_names <- str_extract(tiff_paths, "[0-9]+")
 
 summary(mibi.sce)
+colData(mibi.sce)$cell_type <- cell_type(mibi.sce)
 glimpse(colData(mibi.sce))
 ```
 
@@ -87,11 +91,6 @@ for (i in seq_along(tiff_paths)) {
   print(paste0(i, "/", length(tiff_paths)))
   r <- raster(tiff_paths[[i]])
   ims[[i]] <- crop(r, extent(1, params$qsize, 1, params$qsize))
-}
-
-# just a peek
-for (i in sample(seq_along(ims), 10)) {
-  plot(ims[[i]])
 }
 
 names(ims) <- sample_names
@@ -117,16 +116,97 @@ comparable. First, for transformation, we'll convert antigen expression values
 to ranks and then threshold.
 
 ```{r}
+mibi.sce <- quantile_transform(mibi.sce, params$max_rank)
 x <- t(assay(mibi.sce))
-for (j in seq_len(ncol(x))) {
-  x[, j] <- pmin(rank(x[, j], ties = "random"), params$max_rank) / params$max_rank
-}
+x_order <- hclust(dist(t(x)))$order
+pairs(x[, x_order[1:6]], col = rgb(0, 0, 0, 0.5), cex=0.1)
 ```
 
-* get features from process segmentations
-* center and standardize all
-* run u-map after reweighting
+Next, we'll extract some features from the spatial data. Note that there are NAs
+for border regions.
 
+```{r}
+# polygonize each raster
+col_df <- as.data.frame(colData(mibi.sce))
+polys <- list()
+for (i in seq_along(ims)) {
+  polys[[i]] <- polygonize(ims[[i]]) %>%
+    mutate(SampleID = as.numeric(sample_names[i])) %>%
+    unite(sample_by_cell, SampleID, cellLabelInImage, remove=FALSE) %>%
+    inner_join(col_df, by = c("sample_by_cell", "SampleID", "cellLabelInImage"))
+}
+
+# a little plot
+polys_df <- do.call(rbind, polys)
+ggplot(polys_df %>% filter(!is.na(cellSize),  SampleID %in% 1:16)) +
+  geom_sf(aes(fill = as.factor(tumorYN))) +
+  facet_wrap(Survival_days_capped_2016.1.1~SampleID) +
+  theme(legend.position = "bottom")
+
+# extract some basic features
+spatial_stats <- list()
+for (i in seq_along(polys)) {
+  print(paste0("processing sample ", i, "/", length(polys)))
+  cell_ids <- unique(polys[[i]]$cellLabelInImage)
+  spatial_stats[[i]] <- loop_stats(cell_ids, "raster", ims[[i]], polys[[i]], typeProps, plot=F)
+}
+
+names(spatial_stats) <- sample_names
+spatial_stats <- bind_rows(spatial_stats, .id = "SampleID") %>%
+  unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+  dcast(sample_by_cell ~ cellType, fill=0) %>%
+  rename(`NA` = "background")
+```
+
+Now, we'll standardize these features and learn some embeddings.
+
+```{r}
+# standardize features between the two tables
+x <- t(assay(mibi.sce)) %>%
+  as_tibble()
+x$sample_by_cell <- col_df$sample_by_cell
+x <- x %>%
+  mutate_at(vars(-sample_by_cell), function(u) (u - min(u)) / diff(range(u))) %>%
+  mutate_at(vars(-sample_by_cell), function(u) u / sqrt(ncol(x)))
+
+y <- spatial_stats %>%
+  mutate_at(vars(-sample_by_cell), function(u) (u - min(u)) / diff(range(u))) %>%
+  mutate_at(vars(-sample_by_cell), function(u) u / sqrt(ncol(y))) %>%
+  select_if(function(u) !all(is.na(u)))
+
+z <- x %>% inner_join(y, by = "sample_by_cell")
+z_mat <- z %>%
+  dplyr::select(-sample_by_cell) %>%
+  as.matrix()
+heatmap(z_mat[1:450, ])
+
+# learning embeddings across the two tables
+embeddings <- umap(z_mat)
+embeddings_df <- embeddings$layout %>%
+  as_tibble(.name_repair = "universal") %>%
+  rename(`...1` = "l1", `...2` = "l2") %>%
+  mutate(sample_by_cell = z$sample_by_cell) %>%
+  left_join(col_df) %>%
+  left_join(z)
+```
+
+We'll plot the embeddings we just made, against some of the derived features.
+
+```{r}
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = cell_type)) +
+  facet_wrap(~ SampleID) +
+  ggtitle("Cell Types")
+
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = Fe)) +
+  facet_wrap(~ SampleID)
+
+ggplot(embeddings_df) +
+  geom_point(aes(x = l1, y = l2, col = sqrt(Macrophages))) +
+  facet_wrap(~ SampleID) +
+  ggtitle("Prop. Neighbors are Macrophages")
+```
 
 # Cells $\to$ Samples
 
