@@ -101,24 +101,8 @@ We can turn this into a more familiar `igraph` object, for access to the usual
 graph manipulation routines.
 
 ```{r}
-relations_data <- list()
-for (i in seq_along(nb_contig)) {
-  relations_data[[i]] <- tibble(
-    from = polys$cellLabelInImage[i],
-    to = polys$cellLabelInImage[nb_contig[[i]]]
-  )
-}
-
-relations_data <- bind_rows(relations_data)
-G <- graph_from_data_frame(relations_data, vertices=polys)
-
-plot(
-  G,
-  vertex.color = as.factor(V(G)$immuneGroup),
-  vertex.size=3,
-  edge.arrow.size=0,
-  vertex.label=NA
-)
+G <- extract_graph(polys$cellLabelInImage, polys$geometry)
+plot(G, vertex.size=3, edge.arrow.size=0, vertex.label=NA)
 ```
 
 # Raster Window Features
