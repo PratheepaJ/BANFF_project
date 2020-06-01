@@ -317,7 +317,8 @@ at the relationship between those features and the above embeddings, to see if
 we could map the cytof data into the mibitof embedding space.
 
 ```{r}
-
+load(file.path(data_dir, "masstagSCE.rda"))
+masstag <- data_list("sce")
 ```
 
 
