@@ -46,8 +46,13 @@ polygonize <- function(im) {
   polys <- st_as_stars(im) %>%
     st_as_sf(merge = TRUE) %>%
     st_cast("POLYGON")
+
   colnames(polys)[1] <- "cellLabelInImage"
-  polys
+  polys %>%
+    mutate(geometry = st_buffer(geometry, dist = 0)) %>%
+    group_by(cellLabelInImage) %>%
+    summarise(n_polys = n()) %>%
+    dplyr::select(-n_polys)
 }
 
 backgroundProp <- function(x, ...) {
@@ -93,7 +98,7 @@ cell_type <- function(exper) {
 #'   group).
 #' @return result A tibble mapping the cell to statistics calculated by fun.
 graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
-  ball <- neighbors(G, as.character(cell_id))
+  ball <- igraph::neighbors(G, as.character(cell_id))
   cell_stats <- polys %>%
     filter(cellLabelInImage %in% names(ball)) %>%
     group_map(fun)
@@ -101,6 +106,21 @@ graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
   cell_stats[[1]] %>%
     mutate(cellLabelInImage = cell_id) %>%
     dplyr::select(cellLabelInImage, everything())
+}
+
+extract_graph <- function(labels, geometries, snap = 4) {
+  nb <- spdep::poly2nb(geometries, snap = snap)
+
+  relations_data <- list()
+  for (i in seq_along(nb)) {
+    relations_data[[i]] <- tibble(
+      from = labels[i],
+      to = c(labels[i], labels[nb[[i]]]) # always have self loop
+    )
+  }
+
+  relations_data <- bind_rows(relations_data)
+  igraph::graph_from_data_frame(relations_data, labels)
 }
 
 #' Apply fun to Local Neighborhoods
