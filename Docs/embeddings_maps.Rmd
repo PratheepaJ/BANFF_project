@@ -410,38 +410,30 @@ model <- keras_model_sequential() %>%
   layer_activation('relu') %>%
   layer_dense(units = 16, input_shape = n_ft) %>%
   layer_activation('relu') %>%
-  layer_dense(units = 2)
-
+  layer_dense(units = 2) %>%
+  compile(optimizer = "adam", loss = "mse")
 ```
 
 This prepares the training data, which maps antigen values and cell type
 indicators to embedding locations.
 
 ```{r}
-load("0602.RData")
-
-
-dim(embeddings_df)
-head(embeddings_df)
-
-dim(x)
-dim(y)
 
 predictors <- x %>%
   left_join(
     y %>%
-    dplyr::select(-starts_with("graph"), -log_size)
-  )
+    dplyr::select(-starts_with("graph"), -log_size) %>%
+    rename_all(tolower),
+    by = "sample_by_cell"
+  ) %>%
+  dplyr::select(common_antigens, tolower(levels(col_df$cell_type)))
+
 response <- embeddings_df %>%
   dplyr::select(l1, l2) %>%
   as.matrix()
 
-predictors_mat <- predictors %>%
-  dplyr::select(-sample_by_cell) %>%
-  as.matrix()
-
-model(predictors_mat)
-
+model %>%
+  fit(as.matrix(predictors), response, epochs=20, batch_size=32)
 ```
 
 
