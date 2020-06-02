@@ -176,3 +176,19 @@ loop_stats <- function(cell_ids, type="raster", ...) {
 
   bind_rows(result)
 }
+
+generate_model <- function(n_ft) {
+  model <- keras_model_sequential() %>%
+    layer_dense(units = 32, input_shape = n_ft) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 2) %>%
+    compile(optimizer = optimizer_adam(lr=1e-2), loss = "mae")
+}
