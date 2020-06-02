@@ -400,20 +400,6 @@ to come up with a new spatial summary of the mass spec data. Otherwise, we would
 report that the antigen information on its own is not enough to determine the
 spatial characteristics of the sample.
 
-Since I want to predict a two-dimensional response, I'll use a simple MLP with
-two output heads.
-
-```{r}
-n_ft <- length(common_antigens) + length(levels(col_df$cell_type))
-model <- keras_model_sequential() %>%
-  layer_dense(units = 16, input_shape = n_ft) %>%
-  layer_activation('relu') %>%
-  layer_dense(units = 16, input_shape = n_ft) %>%
-  layer_activation('relu') %>%
-  layer_dense(units = 2) %>%
-  compile(optimizer = "adam", loss = "mse")
-```
-
 This prepares the training data, which maps antigen values and cell type
 indicators to embedding locations.
 
@@ -425,17 +411,43 @@ predictors <- x %>%
     dplyr::select(-starts_with("graph"), -log_size) %>%
     rename_all(tolower),
     by = "sample_by_cell"
-  ) %>%
-  dplyr::select(common_antigens, tolower(levels(col_df$cell_type)))
-
+  )
 response <- embeddings_df %>%
   dplyr::select(l1, l2) %>%
   as.matrix()
 
+pred_mat <- predictors %>%
+  dplyr::select(common_antigens, tolower(levels(col_df$cell_type))) %>%
+  as.matrix()
+
+model <- generate_model(ncol(pred_mat))
 model %>%
-  fit(as.matrix(predictors), response, epochs=20, batch_size=32)
+  fit(pred_mat, response, epochs=1000, batch_size=1024)
 ```
 
+```{r}
+y_hat <- predict(model, as.matrix(predictors))
+plot(response, cex=0.1, col = rgb(0, 0, 0, 0.1))
+points(y_hat, cex=0.1, col = rgb(1, 0, 0, 0.1))
+```
+
+We can compare this with what the predictions would have been if we had used all
+the antigens (but no explicit spatial information).
+
+```{r}
+pred_mat <- predictors %>%
+  dplyr::select(colnames(x)[1:49], tolower(levels(col_df$cell_type)))
+
+model <- generate_model(ncol(pred_mat))
+model %>%
+  fit(pred_mat, response, epochs=1000, batch_size=1024)
+```
+
+```{r}
+y_hat <- predict(model, as.matrix(predictors))
+plot(response, cex=0.1, col = rgb(0, 0, 0, 0.1))
+points(y_hat, cex=0.1, col = rgb(1, 0, 0, 0.1))
+```
 
 [^1]: We can try predicting different sample characteristics from the
     embeddings, for example. It seems like what people do by eye anyways (trying
