@@ -70,7 +70,7 @@ typeProps <- function(x, ...) {
   }
 
   props <- table(x$cell_type, useNA = "ifany")
-  tibble(cellType = names(props), props = props / sum(props)) %>%
+  tibble(cellType = names(props), props = as.numeric(props) / sum(props)) %>%
     filter(props != 0)
 }
 
@@ -104,7 +104,7 @@ graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
     group_map(fun)
 
   cell_stats[[1]] %>%
-    mutate(cellLabelInImage = cell_id) %>%
+    dplyr::mutate(cellLabelInImage = cell_id) %>%
     dplyr::select(cellLabelInImage, everything())
 }
 
@@ -175,4 +175,20 @@ loop_stats <- function(cell_ids, type="raster", ...) {
   }
 
   bind_rows(result)
+}
+
+generate_model <- function(n_ft) {
+  model <- keras_model_sequential() %>%
+    layer_dense(units = 32, input_shape = n_ft) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 32, input_shape = 32) %>%
+    layer_activation('relu') %>%
+    layer_dense(units = 2) %>%
+    compile(optimizer = optimizer_adam(lr=1e-2), loss = "mae")
 }
