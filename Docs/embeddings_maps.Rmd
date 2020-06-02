@@ -66,7 +66,9 @@ Loading data...
 ```{r}
 data_dir <- file.path("..", "Data")
 load(file.path(data_dir, "mibiSCE.rda"))
-tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", full=T)[1:6]
+tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", full=T)[1:25]
+tiff_paths <- setdiff(tiff_paths, "../Data/TNBC_shareCellData/p30_labeledcellData.tiff") # we don't seem to have colData for this patient
+
 sample_names <- str_extract(tiff_paths, "[0-9]+")
 
 summary(mibi.sce)
@@ -140,10 +142,13 @@ col_df <- as.data.frame(colData(mibi.sce)) %>%
 
 polys <- list()
 for (i in seq_along(ims)) {
+  cur_cols <- col_df %>%
+    filter(SampleID %in% sample_names[i])
+
   polys[[i]] <- polygonize(ims[[i]]) %>%
     mutate(SampleID = as.numeric(sample_names[i])) %>%
     unite(sample_by_cell, SampleID, cellLabelInImage, remove=FALSE) %>%
-    inner_join(col_df, by = c("sample_by_cell", "SampleID", "cellLabelInImage"))
+    inner_join(cur_cols, by = c("sample_by_cell", "SampleID", "cellLabelInImage"))
 }
 
 # a little plot
@@ -182,7 +187,8 @@ graph_stats <- bind_rows(graph_stats, .id = "SampleID") %>%
   left_join(as.data.frame(cell_stats))
 
 # example plot: what are the neighborhoods of tumors?
-plot(graph_stats$`Keratin-positive tumor`, graph_stats$`graph_neighbors_Keratin-positive tumor`)
+plot(graph_stats$`Keratin-positive tumor` + runif(nrow(graph_stats), -0.25, 0.25),
+     graph_stats$`graph_neighbors_Keratin-positive tumor`)
 ```
 
 Now, we'll standardize these features and learn some embeddings.
@@ -221,7 +227,7 @@ embeddings_df <- embeddings$layout %>%
 We'll plot the embeddings we just made, against some of the derived features.
 
 ```{r}
-ggplot(embeddings_df) +
+ggplot(embeddings_df %>% filter(SampleID < 23)) +
   geom_hline(yintercept = 0) +
   geom_vline(xintercept = 0) +
   geom_point(
@@ -234,11 +240,11 @@ ggplot(embeddings_df) +
   ggtitle("Cell Types") +
   theme(legend.position = "bottom")
 
-ggplot(embeddings_df) +
+ggplot(embeddings_df %>% filter(SampleID < 23)) +
   geom_point(aes(x = l1, y = l2, col = Fe)) +
   facet_wrap(~ SampleID)
 
-ggplot(embeddings_df) +
+ggplot(embeddings_df %>% filter(SampleID < 23)) +
   geom_hline(yintercept = 0) +
   geom_vline(xintercept = 0) +
   geom_point(
@@ -274,7 +280,6 @@ ggplot(embeddings_df) +
   geom_vline(xintercept = 0) +
   scale_color_brewer(palette = "Set2") +
   guides(col = guide_legend(override.aes = list(alpha = 1, size = 5))) +
-  facet_wrap(~SampleID) +
   ggtitle("Clusters vs. Cell Types") +
   theme(legend.position = "bottom")
 
@@ -289,25 +294,33 @@ cluster_props <- embeddings_df %>%
     prop = count / total
   )
 
-ggplot(cluster_props) +
-  geom_bar(
-    aes(x = as.factor(SampleID), y = prop, fill = cluster),
-    position = "stack", stat = "identity"
-  ) +
-  scale_fill_brewer(palette = "Set3")
+# order the clusterings
+cluster_mat <- cluster_props %>%
+  dplyr::select(-count, -total) %>%
+  spread(cluster, prop, 0)
+cluster_order <- hclust(
+  dist(as.matrix(cluster_mat[, -1]))
+)$order
 
-tmp <- cluster_props %>%
-  left_join(
-    col_df %>%
-    select(SampleID, GRADE) %>%
-    unique()
+cluster_props <- cluster_props %>%
+  mutate(
+    SampleID = factor(SampleID, cluster_mat[[1]][cluster_order])
   )
 
-ggplot(tmp) +
-  geom_dotplot(
-    aes(fill = as.factor(GRADE), x = prop)
+grade <- tibble(col_df) %>%
+  dplyr::select(SampleID, GRADE) %>%
+  mutate(
+    SampleID = factor(SampleID, levels(cluster_props$SampleID))
+  ) %>%
+  unique()
+
+ggplot(cluster_props %>% left_join(grade)) +
+  geom_bar(
+    aes(x = SampleID, y = prop, fill = cluster),
+    stat = "identity"
   ) +
-  facet_wrap(~ cluster)
+  facet_grid(.~GRADE, scales="free_x", space="free_x") +
+  scale_fill_brewer(palette = "Set3")
 ```
 
 # Guessing the Embedding
