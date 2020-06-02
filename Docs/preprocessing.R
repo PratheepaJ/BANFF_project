@@ -70,7 +70,7 @@ typeProps <- function(x, ...) {
   }
 
   props <- table(x$cell_type, useNA = "ifany")
-  tibble(cellType = names(props), props = props / sum(props)) %>%
+  tibble(cellType = names(props), props = as.numeric(props) / sum(props)) %>%
     filter(props != 0)
 }
 
@@ -104,7 +104,7 @@ graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
     group_map(fun)
 
   cell_stats[[1]] %>%
-    mutate(cellLabelInImage = cell_id) %>%
+    dplyr::mutate(cellLabelInImage = cell_id) %>%
     dplyr::select(cellLabelInImage, everything())
 }
 
