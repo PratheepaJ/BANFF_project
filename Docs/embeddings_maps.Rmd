@@ -319,8 +319,10 @@ grade <- tibble(col_df) %>%
 ggplot(cluster_props %>% left_join(grade)) +
   geom_bar(
     aes(x = SampleID, y = prop, fill = cluster),
-    stat = "identity"
+    stat = "identity", width = 1
   ) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_discrete(expand = c(0, 0)) +
   facet_grid(.~GRADE, scales="free_x", space="free_x") +
   scale_fill_brewer(palette = "Set3")
 ```
@@ -328,6 +330,37 @@ ggplot(cluster_props %>% left_join(grade)) +
 Question: Can you map the different clusters back to the spatial patterns that
 we had noticed from before? E.g., are those in cluster "5" more spatially
 heterogeneous?
+
+To answer this, let's compare samples 23, 27, 2 with 10 and 12. These samples
+seem to have pretty different cluster compositions, even though they both lie in
+the grade 3 group.
+
+```{r}
+polys_q <- polys_df %>%
+  filter(SampleID %in% c("23", "27", "2", "10", "12")) %>%
+  mutate(compare = ifelse(SampleID %in% c("10", "12"), "group2", "group1"))
+
+ggplot(polys_q) +
+  geom_sf(aes(fill = as.factor(tumorYN))) +
+  facet_wrap(compare ~ SampleID)
+  theme(legend.position = "bottom")
+```
+
+I'm not sure I'd have put 10 and 12 that close to one another, since 10 has lots
+of empty space, but at least the first three do seem qualitatively similar.
+
+In fact, we can compare many of the spatial images, based on the ordering we
+just defined.
+
+```{r}
+polys_df <- polys_df %>%
+  mutate(SampleID = factor(SampleID, levels(cluster_props$SampleID)))
+
+ggplot(polys_df %>% filter(SampleID %in% levels(polys_df$SampleID)[1:25])) +
+  geom_sf(aes(fill = as.factor(tumorYN))) +
+  facet_wrap(GRADE ~ SampleID) +
+  theme(legend.position = "bottom")
+```
 
 # Guessing the Embedding
 
@@ -385,7 +418,30 @@ This prepares the training data, which maps antigen values and cell type
 indicators to embedding locations.
 
 ```{r}
+load("0602.RData")
+
+
+dim(embeddings_df)
 head(embeddings_df)
+
+dim(x)
+dim(y)
+
+predictors <- x %>%
+  left_join(
+    y %>%
+    dplyr::select(-starts_with("graph"), -log_size)
+  )
+response <- embeddings_df %>%
+  dplyr::select(l1, l2) %>%
+  as.matrix()
+
+predictors_mat <- predictors %>%
+  dplyr::select(-sample_by_cell) %>%
+  as.matrix()
+
+model(predictors_mat)
+
 ```
 
 
