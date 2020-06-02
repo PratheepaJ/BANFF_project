@@ -26,7 +26,7 @@ _Outline_:
 * Relate mass-spec and MIBI measurements by learning a mapping from common
   features (9 shared antigens and overlapping patient characteristics) to the
   location on the embedding.
-  - Our predicted spatial expression for a cytof sample is the spatial
+  - Our predicted spatial expression for a mass spec sample is the spatial
     expression pattern associated with that region in the predicted embedding
     space.
   - We can gauge our ability to actually perform spatial expression imputation
@@ -50,6 +50,7 @@ _Themes_:
 library("dplyr")
 library("forcats")
 library("ggplot2")
+library("keras")
 library("raster")
 library("reshape2")
 library("stars")
@@ -57,6 +58,7 @@ library("stringr")
 library("tibble")
 library("tidyr")
 library("umap")
+library("viridis")
 source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
@@ -323,15 +325,67 @@ ggplot(cluster_props %>% left_join(grade)) +
   scale_fill_brewer(palette = "Set3")
 ```
 
+Question: Can you map the different clusters back to the spatial patterns that
+we had noticed from before? E.g., are those in cluster "5" more spatially
+heterogeneous?
+
 # Guessing the Embedding
 
-We'll finally load the cytof data to identify shared features. Then, we'll look
+We'll finally load the mass spec data to identify shared features. Then, we'll look
 at the relationship between those features and the above embeddings, to see if
-we could map the cytof data into the mibitof embedding space.
+we could map the mass spec data into the mibitof embedding space.
+
+These are the antigens in both the mass spec and mibitof data.
 
 ```{r}
 load(file.path(data_dir, "masstagSCE.rda"))
-masstag <- data_list("sce")
+masstag <- data_list("sce") %>%
+  subsample_experiments()
+masstag_mat <- lapply(masstag, function(x) {
+  z <- t(assay(x))
+  colnames(z) <- rownames(x)
+  as_tibble(z)
+}) %>%
+  bind_rows(.id = "cell_type")
+
+sort(colnames(masstag_mat))
+rownames(mibi.sce)
+common_antigens <- intersect(rownames(masstag$tcell.sce), rownames(mibi.sce))
+common_antigens
+```
+
+Here are the sample information available in either. It seems that we could use the cell type and the grade of the samples; other than that, the features are not very comparable.
+```{r}
+names(colData(mibi.sce))
+names(colData(masstag$tcell.sce))
+```
+
+I'll learn a mapping at the cell level, using (1) cell identity and (2) levels
+of `r common_antigens` to identify the corresponding location in the embedding
+space. If this is accurate, we could then cluster the imputed cell embeddings,
+to come up with a new spatial summary of the mass spec data. Otherwise, we would
+report that the antigen information on its own is not enough to determine the
+spatial characteristics of the sample.
+
+Since I want to predict a two-dimensional response, I'll use a simple MLP with
+two output heads.
+
+```{r}
+n_ft <- length(common_antigens) + length(levels(col_df$cell_type))
+model <- keras_model_sequential() %>%
+  layer_dense(units = 16, input_shape = n_ft) %>%
+  layer_activation('relu') %>%
+  layer_dense(units = 16, input_shape = n_ft) %>%
+  layer_activation('relu') %>%
+  layer_dense(units = 2)
+
+```
+
+This prepares the training data, which maps antigen values and cell type
+indicators to embedding locations.
+
+```{r}
+head(embeddings_df)
 ```
 
 
