@@ -7,7 +7,9 @@ params:
 ---
 
 _Goal_: Map mass-spec measurements to plausible spatial expression patterns, based
-on MIBI-ToF measurements, and provide some sense of uncertainty in the estimate.
+on MIBI-  scale_y_continuous(limits = c(-15, 5)) +
+  scale_x_continuous(limits = c(-15, 17)) +
+ToF measurements, and provide some sense of uncertainty in the estimate.
 
 _Outline_:
 
@@ -95,7 +97,7 @@ instead we'll extract small quadrants from the full images.
 We'll loop over all the tiffs and extract the `r params$qsize` $\times$
 `r params$qsize` top left quadrant from each image.
 
-```{r}
+```{r subsampling}
 ims <- list()
 for (i in seq_along(tiff_paths)) {
   print(paste0(i, "/", length(tiff_paths)))
@@ -125,8 +127,7 @@ transform and reweight the columns, to make the two sets of features more
 comparable. First, for transformation, we'll convert antigen expression values
 to ranks and then threshold.
 
-```{r}
-mibi.sce <- quantile_transform(mibi.sce, params$max_rank)
+```{r transformation, message=TRUE}
 x <- t(assay(mibi.sce))
 x_order <- hclust(dist(t(x)))$order
 pairs(x[, x_order[1:6]], col = rgb(0, 0, 0, 0.5), cex=0.1)
@@ -136,7 +137,7 @@ Next, we'll extract some features from the spatial data. Note that some cells
 seem to appear in the raster but not in the `colData`. This seems weird, and is
 worth looking into, but for now I'm going to just innerJoin to ignore that.
 
-```{r, fig.width=12, fig.height=20}
+```{r graph_stats, fig.width=12, fig.height=20}
 # polygonize each raster
 col_df <- as.data.frame(colData(mibi.sce)) %>%
   mutate(
@@ -147,7 +148,6 @@ polys <- list()
 for (i in seq_along(ims)) {
   cur_cols <- col_df %>%
     filter(SampleID %in% sample_names[i])
-
   polys[[i]] <- polygonize(ims[[i]]) %>%
     mutate(SampleID = as.numeric(sample_names[i])) %>%
     unite(sample_by_cell, SampleID, cellLabelInImage, remove=FALSE) %>%
@@ -217,7 +217,9 @@ z_mat <- z %>%
 heatmap(z_mat)
 
 # learning embeddings across the two tables
-embeddings <- umap(z_mat)
+conf <- umap.defaults
+conf$min_dist <- 0.8
+embeddings <- umap(z_mat, conf)
 embeddings_df <- embeddings$layout %>%
   as_tibble(.name_repair = "universal") %>%
   rename(`...1` = "l1", `...2` = "l2") %>%
@@ -260,6 +262,7 @@ ggplot(embeddings_df %>% filter(SampleID < 23)) +
   ) +
   scale_color_viridis(option = "inferno") +
   facet_wrap(~ SampleID) +
+  theme(legend.position = "bottom") +
   ggtitle("Prop. Neighbors are Macrophages")
 ```
 
@@ -276,15 +279,14 @@ clusters <- kmeans(embeddings$layout, centers = params$cluster_K)
 ggplot(embeddings_df) +
   geom_point(
     aes(x = l1, y = l2, col = cell_group),
-    size = 0.5, alpha = 0.7
+    size = 0.5, alpha = 0.1
   ) +
   geom_text(
     data = data.frame(clusters$centers, cluster = seq_len(nrow(clusters$centers))),
-    aes(x = X1, y = X2, label = cluster), size = 5,
+    aes(x = X1, y = X2, label = cluster), size = 5
   ) +
   geom_hline(yintercept = 0) +
   geom_vline(xintercept = 0) +
-  ## scale_color_brewer(palette = "Set2") +
   guides(col = guide_legend(override.aes = list(alpha = 1, size = 5))) +
   ggtitle("Clusters vs. Cell Types") +
   theme(legend.position = "bottom")
