@@ -178,7 +178,7 @@ loop_stats <- function(cell_ids, type="raster", ...) {
 }
 
 generate_model <- function(n_ft) {
-  model <- keras_model_sequential() %>%
+  keras_model_sequential() %>%
     layer_dense(units = 32, input_shape = n_ft) %>%
     layer_activation('relu') %>%
     layer_dense(units = 32, input_shape = 32) %>%
