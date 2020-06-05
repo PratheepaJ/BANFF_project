@@ -1,0 +1,113 @@
+---
+title: Disentangling Composition and Spatial Effects
+params:
+  K: 20
+---
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("igraph")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+```{r}
+data_dir <- file.path("..", "Data")
+loaded_ <- load_mibi(file.path("..", "Data"), 20)
+subsample <- spatial_subsample(loaded_$tiffs, loaded_$mibi)
+ims <- subsample$ims
+mibi_sce <- subsample$exper
+```
+
+* get cluster the proteins, and extract compositions from each sample
+* plot this against the tumor intrusion
+* now calculate my own spatial statistics.
+  - neighborhood entropy
+  - neighborhood size
+* relate summaries of these spatial statistics to composition
+  - if not totally predictive, then the latent idea is worthwhile
+  - otherwise, it's a surprise to the community
+
+```{r}
+cell_clusters <- kmeans(t(assay(mibi_sce)), params$K)
+props <- sample_proportions(assay(mibi_sce), cell_clusters)
+```
+
+```{r}
+cd <- colData(mibi_sce) %>%
+  as.data.frame() %>%
+  unite(scell, SampleID, cellLabelInImage, remove=FALSE) %>%
+  mutate(cell_group = fct_lump(cell_type, prop = 0.05))
+
+cd_samp <- cd %>%
+  group_by(SampleID) %>%
+  summarise_all(function(x) { x[1] })
+
+cluster_ids <- setNames(cell_clusters$cluster, cd$scell)
+plot(cd_samp$TIL_score + runif(nrow(cd_samp), 0, 0.1), cd_samp$Survival_days_capped_2016.1.1)
+```
+
+Extract local entropy and neighborhood sizes.
+```{r spatial_stat}
+sample_names <- as.character(cd_samp$SampleID)
+graphs <- list()
+for (i in seq_along(sample_names)) {
+  print(sprintf("graph %s/%s", i, length(sample_names)))
+  poly <- polygonize(ims[[sample_names[i]]]) %>%
+    filter(cellLabelInImage > 1)
+  graphs[[i]] <- extract_graph(poly)
+}
+
+spatial <- list()
+for (i in seq_along(sample_names)) {
+  print(sprintf("spatial stats %s/%s", i, length(sample_names)))
+  SG <- subgraphs(graphs[[i]])
+  ptrn <- paste0("^", sample_names[i], "_")
+  clusters_ <- cluster_ids[grepl(ptrn, names(cluster_ids))]
+  names(clusters_) <- gsub(ptrn, "", names(clusters_))
+
+  spatial[[sample_names[i]]] <- tibble(
+    sample_by_cell = paste0(sample_names[i], "_", names(SG)),
+    entropy = entropies(SG, clusters_),
+    nb_size = avg_dists(SG)
+  )
+}
+```
+
+```{r plot_spatial}
+spatial <- bind_rows(spatial)
+
+ggplot(spatial %>% inner_join(cd)) +
+  geom_histogram(aes(x = entropy, fill = as.factor(TIL_score))) +
+  scale_fill_brewer(palette = "Greens", na.value = "grey") +
+  facet_grid(cell_group ~ ., scale = "free")
+
+ggplot(spatial %>% inner_join(cd)) +
+  geom_histogram(aes(x = nb_size, fill = as.factor(TIL_score))) +
+  scale_fill_brewer(palette = "Greens", na.value = "grey") +
+  facet_grid(cell_group ~ ., scale = "free")
+```
+
+
+```{r}
+spatial_samp <- spatial %>%
+  inner_join(cd) %>%
+  group_by(SampleID) %>%
+  summarise(
+    me = mean(entropy),
+    sde = sd(entropy),
+    mnb = mean(nb_size),
+    sdnb = sd(nb_size)
+  ) %>%
+  left_join(cd_samp)
+
+ggplot(spatial_samp) +
+  geom_point(
+    aes(x = me, y = Survival_days_capped_2016.1.1, size = TIL_score)
+  )
+```
+
+

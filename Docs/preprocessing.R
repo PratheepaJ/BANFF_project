@@ -51,7 +51,7 @@ polygonize <- function(im) {
   polys %>%
     mutate(geometry = st_buffer(geometry, dist = 0)) %>%
     group_by(cellLabelInImage) %>%
-    summarise(n_polys = n()) %>%
+    summarise(n_polys = n(), .groups = "drop") %>%
     dplyr::select(-n_polys)
 }
 
@@ -108,15 +108,25 @@ graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
     dplyr::select(cellLabelInImage, everything())
 }
 
-extract_graph <- function(labels, geometries, snap = 4) {
-  nb <- spdep::poly2nb(geometries, snap = snap)
+extract_graph <- function(geometries, K = 5) {
+  nb <- spdep::knn2nb(
+    spdep::knearneigh(st_centroid(geometries[1:nrow(geometries), ]), K)
+  )
+  labels <- unique(geometries$cellLabelInImage)
+  dists <- sapply(geometries$geometry, st_centroid) %>%
+    t()
 
   relations_data <- list()
   for (i in seq_along(nb)) {
     relations_data[[i]] <- tibble(
       from = labels[i],
-      to = c(labels[i], labels[nb[[i]]]) # always have self loop
+      to = labels[nb[[i]]]
     )
+
+    relations_data[[i]]$dist <- pracma::distmat(
+      dists[i, ], dists[nb[[i]], ]
+    ) %>%
+      as.numeric()
   }
 
   relations_data <- bind_rows(relations_data)
@@ -191,4 +201,86 @@ generate_model <- function(n_ft) {
     layer_activation('relu') %>%
     layer_dense(units = 2) %>%
     compile(optimizer = optimizer_adam(lr=1e-2), loss = "mae")
+}
+
+load_mibi <- function(data_dir, n_paths = NULL) {
+  load(file.path(data_dir, "mibiSCE.rda"))
+  tiff_paths <- list.files(file.path(data_dir, "TNBC_shareCellData"), "*.tiff", full=T)
+
+  if (is.null(n_paths)) {
+    n_paths = length(tiff_paths)
+  }
+
+  tiff_paths <- tiff_paths[1:n_paths]
+  sample_names <- str_extract(tiff_paths, "[0-9]+")
+  summary(mibi.sce)
+  colData(mibi.sce)$cell_type <- cell_type(mibi.sce)
+  list(
+    tiffs = tiff_paths,
+    mibi = mibi.sce[, colData(mibi.sce)$SampleID %in% sample_names]
+  )
+}
+
+spatial_subsample <- function(tiff_paths, exper, qsize=500) {
+  ims <- list()
+  for (i in seq_along(tiff_paths)) {
+    print(paste0(i, "/", length(tiff_paths)))
+    r <- raster(tiff_paths[[i]])
+    ims[[i]] <- crop(r, extent(1, qsize, 1, qsize))
+  }
+
+  names(ims) <- str_extract(tiff_paths, "[0-9]+")
+  cur_cells <- sapply(ims, raster::unique) %>%
+    melt() %>%
+    dplyr::rename(cellLabelInImage = "value", SampleID = "L1") %>%
+    unite(sample_by_cell, SampleID, cellLabelInImage, remove=F)
+
+  colData(exper)$sample_by_cell <- colData(exper) %>%
+                    as.data.frame() %>%
+                    dplyr::select(SampleID, cellLabelInImage) %>%
+                    unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+                    .[["sample_by_cell"]]
+
+  list(
+    ims = ims,
+    exper = exper[, colData(exper)$sample_by_cell %in% cur_cells$sample_by_cell]
+  )
+}
+
+sample_proportions <- function(x, clusters) {
+
+}
+
+subgraphs <- function(G, order=3) {
+  ids <- V(G)
+  SG <- list()
+  for (i in seq_along(ids)) {
+    ball <- do.call(c, igraph::ego(G, ids[[i]], order=order))
+    SG[[i]] <- igraph::induced_subgraph(G, ball)
+
+  }
+  names(SG) <- ids
+
+  SG
+}
+
+entropies <- function(G, clusters_) {
+  ents <- list()
+  for (g in seq_along(G)) {
+    counts <- table(clusters_[names(V(G[[g]]))])
+    fq <- counts / sum(counts)
+    ents[[g]] <- -sum(fq * log(fq))
+  }
+
+  do.call(c, ents)
+}
+
+avg_dists <- function(G) {
+  dists <- list()
+
+  for (g in seq_along(G)) {
+    dists[[g]] <- mean(edge_attr(G[[g]], "dist"))
+  }
+
+  do.call(c, dists)
 }
