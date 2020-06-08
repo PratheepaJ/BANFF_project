@@ -1,0 +1,59 @@
+---
+title: Inputs for Graph Learning
+---
+
+Our idea here is to simulate some data that we can use to test our graph feature
+learning algorithms.
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("reshape2")
+library("tibble")
+library("forcats")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+```
+
+The mechanism is that the data are generated from something like a stochastic
+block model. The probability of linking between the blocks is predictive of the
+label for the overall graph.
+
+The analogy is that the blocks are tumor and immune cell. Links between blocks
+are like interactions between tumor and immune.
+
+```{r}
+n_samples <- 100
+n_cells <- 20
+pmats <- list()
+for (i in seq_len(n_samples)) {
+  pmats[[i]] <- matrix(rbeta(4, 2, 6), 2, 2)
+  diag(pmats[[i]]) <- rbeta(2, 3, 2)
+}
+
+adjmats <- list()
+zs <- list()
+for (i in seq_len(n_samples)) {
+  zs[[i]] <- sample(1:2, n_cells, replace=T)
+  adjmats[[i]] <- matrix(0, n_cells, n_cells)
+  for (j in seq_len(2)) {
+    for (k in seq_len(2)) {
+      nij <- prod(dim(adjmat[zs == j, zs ==  k]))
+      p <- pmats[[i]][j, k]
+      adjmats[[i]][zs == j, zs == k] <- sample(0:1, nij, prob=c(1 - p, p), replace=T)
+    }
+  }
+}
+```
+
+Can visualize some of the adjacency matrices.
+
+```{r}
+pmats[1:3]
+lapply(adjmats[1:3], heatmap)
+```
+
+Now let's save the edgelists and cell data, for use during graph modeling.
+
+In theory, we could also simulate some mixture of gaussians from the latents,
+and then have the response be some function of the link probabilities +
+underlying cell features.
