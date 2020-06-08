@@ -1,10 +1,11 @@
 alignmentMatrix <- function(theta, 
-                            mae, 
+                            sce, 
                             K, 
                             iter = 2000, 
-                            chain = 4){
+                            chain = 4,
+                            SampleID_name = "cell_id"){
   # theta is a 3 dimensional array (iterations * samples * topic)
-  dimnames(theta)[[2]] = colnames(mae) %>% unlist() %>% as.character()
+  dimnames(theta)[[2]] = colnames(sce) %>% as.character()
   dimnames(theta)[[3]] = c(paste0("Topic_", seq(1,K)))
   
   # array to a dataframe
@@ -15,9 +16,9 @@ alignmentMatrix <- function(theta,
   theta_all$Topic = factor(theta_all$Topic)
   
   # join the phyloseq sample data to theta_all
-  sam = colData(mae) %>% data.frame()
+  sam = colData(sce) %>% data.frame()
   theta_all$Sample = as.character(theta_all$Sample)
-  theta_all = left_join(theta_all, sam, by =c("Sample"= "SampleID"))
+  theta_all = left_join(theta_all, sam, by =c("Sample"= SampleID_name))
   theta_all$Chain = factor(theta_all$Chain)
   
   
@@ -27,8 +28,8 @@ alignmentMatrix <- function(theta,
   for(j in 1:K){#Topic of first chain
     chains <- lapply(as.list(1:chain), function(x){
       for(top in 1:K){
-        corrTop[top] <- cor(theta_all %>% filter(Chain == "Chain 1") %>% filter(Topic == paste0("Topic_", j)) %>% dplyr::select(topic.dis),
-                            theta_all %>% filter(Chain == paste0("Chain ",x)) %>% filter(Topic == paste0("Topic_", top)) %>% dplyr::select(topic.dis))
+        corrTop[top] <- cor(theta_all %>% dplyr::filter(Chain == "Chain 1") %>% dplyr::filter(Topic == paste0("Topic_", j)) %>% dplyr::select(topic.dis),
+                            theta_all %>% dplyr::filter(Chain == paste0("Chain ",x)) %>% dplyr::filter(Topic == paste0("Topic_", top)) %>% dplyr::select(topic.dis))
       }
       return(which(corrTop == max(corrTop)))
     })
