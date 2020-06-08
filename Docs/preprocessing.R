@@ -287,7 +287,7 @@ avg_dists <- function(G) {
   do.call(c, dists)
 }
 
-plot_fits <- function(y, glmnet_fit, rf_fit) {
+plot_fits <- function(x, y, glmnet_fit, rf_fit) {
   y_hat <- predict(glmnet_fit, x)
   plot(y, y_hat, ylim = range(y), xlim = range(y))
   abline(0, 1)
