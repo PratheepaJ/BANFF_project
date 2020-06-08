@@ -5,7 +5,7 @@ date: '`r format(Sys.time(), "%d %B, %Y")`'
 output: 
   BiocStyle::html_document
 params:
-  K: 4
+  K: 5
   R: 100
 ---
 

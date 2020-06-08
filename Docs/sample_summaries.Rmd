@@ -1,0 +1,239 @@
+---
+title: Creating and Relating Atlases
+---
+
+* Single-cell analysis often looks like map making
+* Issue is we don't have common features on our two maps
+  - only a few shared landmarks
+
+* To make this analogy concrete, we're going to look at the data
+* Making atlases
+  - Let's show how you can make these atlases, using clustering
+  - Also using U-Map or PCA
+  - Future: We should also make these using spatial or graph information. So,
+    being close by in on an atlas means that you have similar graph features as
+    well.
+* Interpreting atlases
+  - Is over / under representation in some regions of the map related to good /
+    poor outcomes?
+* Relating atlases
+  - Are there similar interpretations coming from the two different datasets? In
+    what ways are the stories discrepant?
+  - Can we try to map clusters / PCA's onto each other? At the least, we can
+    calculate the distance between centroids, using shared features. A more
+    sophisticated / imputation-like idea is to link the atlases in a more
+    continuous way, using some sort of learned (inverse) function. But let's not
+    worry about that.
+
+## Preparing Data
+
+```{r}
+library("dplyr")
+library("forcats")
+library("ggplot2")
+library("plotly")
+library("reshape2")
+library("tibble")
+library("tidyr")
+library("umap")
+source("preprocessing.R")
+theme_set(theme_bw() + theme(panel.grid=element_blank()))
+data_dir <- file.path("..", "Data")
+```
+
+While we're developing the analysis, we'll use subsampled versions of all the
+data. This loads the masstag and mibi datasets.
+
+```{r}
+load(file.path(data_dir, "masstagSCE.rda"))
+masstag <- data_list("sce")
+load(file.path(data_dir, "mibiSCE.rda"))
+
+masstag <- subsample_experiments(masstag)
+mibi <- subsample_experiments(list(mibi.sce), 0.4)[[1]]
+
+colData(mibi)$cell_type <- colData(mibi) %>%
+              as.data.frame() %>%
+              select(tumor_group, immune_group) %>%
+              mutate(
+                cell_type = paste0(tumor_group, immune_group),
+                cell_type = gsub("not immune", "", cell_type),
+                cell_type = gsub("Immune", "", cell_type),
+                ) %>%
+              .[["cell_type"]] %>%
+              as_factor()
+```
+
+This next step is optional -- it transforms the original intensities into
+quantiles, to make measures comparable across experiments.
+
+First, just to get intuition, look at some transforms.
+```{r}
+for (j in seq_len(10)) {
+  r <- rank(assay(mibi[j, ])) / ncol(mibi)
+  plot(assay(mibi[j, ]), r)
+}
+```
+
+Now we'll make the transformation. (tk should create an rmarkdown parameter to skip this transformation).
+```{r}
+mibi <- quantile_transform(mibi)
+for (i in seq_along(masstag)) {
+  masstag[[i]] <- quantile_transform(masstag[[i]])
+}
+```
+
+## Clustering
+
+* k-means on the raw proteins, separately for each of the cell types.
+ - This means that each cluster will have to be marked by celltype-K, rather
+   than just K.
+ - Another consequence is that we'll have a small set of U-Maps for each
+   patient, one for each cell type
+
+```{r}
+heatmap(assay(masstag[[1]][, 1:500]))
+heatmap(assay(masstag[[2]][, 1:500]))
+```
+
+```{r}
+K <- 5
+masstag_clusters <- lapply(masstag, function(x) { kmeans(t(assay(x)), centers=K) })
+
+mibi_clusters <- list()
+mibi_types <- colData(mibi)$cell_type
+for (group in unique(mibi_types)) {
+  cur_x <- t(assay(mibi)[, mibi_types == group])
+  mibi_clusters[[group]] <- kmeans(cur_x, centers=5)
+}
+
+```
+
+We can visualize the centroids for one of the clusterings. We should do this for
+every cluster across all the cell types.
+
+```{r}
+centroids_df <- masstag_clusters[[1]]$centers %>%
+  melt(varnames = c("cluster", "channel"))
+
+ggplot(centroids_df) +
+  geom_tile(
+    aes(x = channel, y = cluster, fill = value)
+  ) +
+  scale_fill_gradient(low = "white", high = "black") +
+  theme(axis.text.x = element_text(angle = 90))
+
+cluster_hist_data <- assay(masstag[[1]]) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(
+    cell_id = row_number(),
+    cluster = as_factor(masstag_clusters[[1]]$cluster)
+  ) %>%
+  melt(id.vars = c("cell_id", "cluster"))
+
+ggplot(cluster_hist_data) +
+  geom_histogram(aes(x = value, fill = cluster), position = "identity", alpha = 0.7) +
+  facet_wrap(. ~ variable, ncol = 5) +
+  scale_y_continuous(limits = c(0, 750)) +
+  theme(panel.spacing = unit(0, "cm"))
+```
+
+
+## Clusters vs. Phenotypes
+
+```{r}
+masstag_pheno <- list()
+for (i in seq_along(masstag)) {
+  masstag_pheno[[i]] <- colData(masstag[[i]]) %>%
+    data.frame() %>%
+    select(patient_id.x, Clinical.Subtype) %>%
+    mutate(
+      cluster = as.factor(masstag_clusters[[i]]$cluster),
+      cell_type = gsub("\\.sce", "" , names(masstag))[i]
+    )
+}
+
+masstag_pheno <- bind_rows(masstag_pheno) %>%
+  group_by(patient_id.x, Clinical.Subtype, cluster, cell_type) %>%
+  summarise(count = n()) %>%
+  group_by(patient_id.x) %>%
+  mutate(
+    total = sum(count),
+    prop = count / total
+  ) %>%
+  unite(cell_cluster, c("cell_type", "cluster"), remove=F)
+
+ggplot(masstag_pheno) +
+  geom_boxplot(
+    aes(x = Clinical.Subtype, y = prop, fill = Clinical.Subtype),
+    varwidth = TRUE
+  ) +
+  scale_y_sqrt() +
+  facet_grid(cell_type~cluster) +
+  theme(panel.spacing = unit(0, "cm"))
+```
+
+```{r}
+masstag_props <- masstag_pheno %>%
+  dcast(patient_id.x + Clinical.Subtype ~ cell_cluster, value.var = "prop", fill=0)
+
+sample_clust <- hclust(dist(masstag_props[, -c(1, 2)]))
+sample_order <- masstag_props$patient_id.x[sample_clust$order]
+
+masstag_pheno <- masstag_pheno %>%
+  ungroup() %>%
+  mutate(patient_id.x = factor(patient_id.x, levels = sample_order))
+
+ggplot(masstag_pheno) +
+  geom_tile(
+    aes(x = cell_cluster, y = patient_id.x, fill = sqrt(prop))
+  ) +
+  facet_grid(Clinical.Subtype ~ cell_type, scale = "free", space = "free") +
+  scale_fill_gradient(low = "white", high = "black") +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.spacing = unit(0, "cm")
+  )
+```
+
+## Dimensionality Reduction
+
+* Run a dimensionality reduction algo on the matrix
+* Plot the resulting map for a couple of samples
+* Overlay the cell types or certain CD's on them
+* Write a function to count the proportions / amounts of cells in different
+  parts of the map
+
+```{r}
+conf <- umap.defaults
+conf$n_components <- 4
+masstag_dimred <- lapply(masstag, function(x) { umap(t(assay(x)), config = conf) })
+```
+
+```{r}
+l <- as_tibble(masstag_dimred[[1]]$layout)
+plot_ly(
+  x = ~V1, y = ~V2, z = ~V3, marker = list(color = ~V4),
+  size = 0.1, alpha = 0.3, data = l, type = "scatter3d"
+)
+```
+
+
+## Reduction vs. Phenotypes
+
+* Run a lasso between proportions in different parts of the map and the observed
+  phenotypes (say, survival, or cancer grade, or some combination of those)
+
+## Repeat everything on the other dataset
+
+## Relating approaches
+
+* Do you observe similar clusters among better / worse outcome patients?
+  - If so, then gives some basis for performing clustering on MIBI that uses
+    spatial info, and imputing that spatial info onto the Cytof
+* Can you try to "reverse" the lasso from above? From a fixed phenotypic
+  configuration, come up with a distribution over plausible maps, for each of
+  the two types of data.
