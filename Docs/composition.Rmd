@@ -15,7 +15,7 @@ source("preprocessing.R")
 theme_set(theme_bw() + theme(panel.grid=element_blank()))
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 data_dir <- file.path("..", "Data")
 loaded_ <- load_mibi(file.path("..", "Data"))
 subsample <- spatial_subsample(loaded_$tiffs, loaded_$mibi)
@@ -69,7 +69,7 @@ ggplot(mprops %>% left_join(cd_samp)) +
 
 
 Extract local entropy and neighborhood sizes.
-```{r spatial_stat}
+```{r spatial_stat, message = FALSE, warning = FALSE}
 sample_names <- as.character(cd_samp$SampleID)
 graphs <- list()
 for (i in seq_along(sample_names)) {
@@ -216,9 +216,9 @@ spatial_samp <- spatial_samp %>%
   mutate(SampleID = factor(SampleID, levels(mprops$SampleID)))
 
 spatial_comp <- spatial_samp %>%
-  select(SampleID, me, sde, mdist, sdist) %>%
+  select(SampleID, me, sde, mdist, sdist, TIL_score) %>%
   left_join(mprops) %>%
-  dcast(SampleID + me + sde + mdist + sdist ~ cluster)
+  dcast(SampleID + me + sde + mdist + sdist + TIL_score ~ cluster)
 
 x <- spatial_comp %>%
   select(matches("[0-9]+")) %>%
@@ -239,17 +239,33 @@ standard errors of entropy and neighborhood size?
 ```{r}
 y <- as.numeric(scale(spatial_comp$mdist))
 fits <- fit_wrapper(x, y)
-plot_fits(y, fits$glmnet, fits$rf)
+plot_fits(x, y, fits$glmnet, fits$rf)
 
 y <- as.numeric(scale(spatial_comp$sde))
 fits <- fit_wrapper(x, y)
-plot_fits(y, fits$glmnet, fits$rf)
+plot_fits(x, y, fits$glmnet, fits$rf)
 
 y <- as.numeric(scale(spatial_comp$sdist))
 fits <- fit_wrapper(x, y)
-plot_fits(y, fits$glmnet, fits$rf)
+plot_fits(x, y, fits$glmnet, fits$rf)
 ```
 
 It seems like average pairwise distance is predictable, though not quite as much
 as entropy. The standard errors are not predictable using the linear model, but
 seem okay using the random forest (which I find an odd result...)
+
+What about the TIL score?
+
+```{r}
+y <- as.numeric(scale(spatial_comp$TIL_score))
+keep_ix <- !is.na(y)
+sum(keep_ix)
+
+fits <- fit_wrapper(x[keep_ix, ], y[keep_ix])
+plot_fits(x[keep_ix, ], y[keep_ix], fits$glmnet, fits$rf)
+```
+
+There are so many missing values in TIL score, that I'm not sure whether we're
+actually learning anything meaningful here. It may be the case that the entropy
+and neighborhood size features are predictable, but not the TIL score? I don't
+have an explanation for how that could happen, though.
