@@ -43,13 +43,13 @@ quantile_transform <- function(exper, max_rank = 2000) {
 }
 
 polygonize <- function(im) {
-  polys <- st_as_stars(im) %>%
-    st_as_sf(merge = TRUE) %>%
-    st_cast("POLYGON")
+  polys <- stars::st_as_stars(im) %>%
+    sf::st_as_sf(merge = TRUE) %>%
+    sf::st_cast("POLYGON")
 
   colnames(polys)[1] <- "cellLabelInImage"
   polys %>%
-    mutate(geometry = st_buffer(geometry, dist = 0)) %>%
+    mutate(geometry = sf::st_buffer(geometry, dist = 0)) %>%
     group_by(cellLabelInImage) %>%
     summarise(n_polys = n(), .groups = "drop") %>%
     dplyr::select(-n_polys)
@@ -110,10 +110,10 @@ graph_stats_cell <- function(cell_id, G, polys, fun, ...) {
 
 extract_graph <- function(geometries, K = 5) {
   nb <- spdep::knn2nb(
-    spdep::knearneigh(st_centroid(geometries[1:nrow(geometries), ]), K)
+    spdep::knearneigh(sf::st_centroid(geometries[1:nrow(geometries), ]), K)
   )
   labels <- unique(geometries$cellLabelInImage)
-  dists <- sapply(geometries$geometry, st_centroid) %>%
+  dists <- sapply(geometries$geometry, sf::st_centroid) %>%
     t()
 
   relations_data <- list()
@@ -153,8 +153,8 @@ raster_stats_cell <- function(cell_id, im, polys, fun, buffer_radius=90,
   sub_poly <- polys %>%
     filter(cellLabelInImage == cell_id) %>%
     .[["geometry"]] %>%
-    st_centroid() %>%
-    st_buffer(dist=buffer_radius)
+    sf::st_centroid() %>%
+    sf::st_buffer(dist=buffer_radius)
 
   im_ <- mask(im, as_Spatial(sub_poly))
   if (plot_masks) {
@@ -212,7 +212,7 @@ load_mibi <- function(data_dir, n_paths = NULL) {
   }
 
   tiff_paths <- tiff_paths[1:n_paths]
-  sample_names <- str_extract(tiff_paths, "[0-9]+")
+  sample_names <- stringr::str_extract(tiff_paths, "[0-9]+")
   summary(mibi.sce)
   colData(mibi.sce)$cell_type <- cell_type(mibi.sce)
   list(
@@ -224,31 +224,33 @@ load_mibi <- function(data_dir, n_paths = NULL) {
 spatial_subsample <- function(tiff_paths, exper, qsize=500) {
   ims <- list()
   for (i in seq_along(tiff_paths)) {
-    print(paste0(i, "/", length(tiff_paths)))
-    r <- raster(tiff_paths[[i]])
-    ims[[i]] <- crop(r, extent(1, qsize, 1, qsize))
+    print(paste0("cropping ", i, "/", length(tiff_paths)))
+    r <- raster::raster(tiff_paths[[i]])
+    ims[[i]] <- raster::crop(r, raster::extent(1, qsize, 1, qsize))
   }
 
-  names(ims) <- str_extract(tiff_paths, "[0-9]+")
+  names(ims) <- stringr::str_extract(tiff_paths, "[0-9]+")
   cur_cells <- sapply(ims, raster::unique) %>%
     melt() %>%
     dplyr::rename(cellLabelInImage = "value", SampleID = "L1") %>%
-    unite(sample_by_cell, SampleID, cellLabelInImage, remove=F)
+    tidyr::unite(sample_by_cell, SampleID, cellLabelInImage, remove=F)
 
-  colData(exper)$sample_by_cell <- colData(exper) %>%
-                    as.data.frame() %>%
-                    dplyr::select(SampleID, cellLabelInImage) %>%
-                    unite(sample_by_cell, SampleID, cellLabelInImage) %>%
-                    .[["sample_by_cell"]]
+  scell <- colData(exper) %>%
+    as.data.frame() %>%
+    dplyr::select(SampleID, cellLabelInImage) %>%
+    tidyr::unite(sample_by_cell, SampleID, cellLabelInImage) %>%
+    .[["sample_by_cell"]]
 
   list(
     ims = ims,
-    exper = exper[, colData(exper)$sample_by_cell %in% cur_cells$sample_by_cell]
+    exper = exper[, scell %in% cur_cells$sample_by_cell]
   )
 }
 
-sample_proportions <- function(x, clusters) {
-
+sample_proportions <- function(SampleID, cluster) {
+  tab <- table(SampleID, cluster)
+  props <- tab / rowSums(tab)
+  props[hclust(dist(props))$order, ]
 }
 
 subgraphs <- function(G, order=3) {
@@ -283,4 +285,20 @@ avg_dists <- function(G) {
   }
 
   do.call(c, dists)
+}
+
+plot_fits <- function(y, glmnet_fit, rf_fit) {
+  y_hat <- predict(glmnet_fit, x)
+  plot(y, y_hat, ylim = range(y), xlim = range(y))
+  abline(0, 1)
+  y_hat <- predict(rf_fit, x)
+  points(y, y_hat, col = "red")
+}
+
+fit_wrapper <- function(x, y) {
+  glmnet_fit <- glmnet::cv.glmnet(x, y)
+  plot(glmnet_fit)
+  rf_fit <- caret::train(x, y)
+  print(rf_fit)
+  list(rf = rf_fit, glmnet = glmnet_fit)
 }
