@@ -229,7 +229,7 @@ x <- spatial_comp %>%
 ```{r}
 y <- as.numeric(scale(spatial_comp$me))
 fits <- fit_wrapper(x, y)
-plot_fits(y, fits$glmnet, fits$rf)
+plot_fits(x, y, fits$glmnet, fits$rf)
 ```
 
 It looks like quite a bit, but not all, of the variation in average entropy, can
@@ -269,3 +269,77 @@ There are so many missing values in TIL score, that I'm not sure whether we're
 actually learning anything meaningful here. It may be the case that the entropy
 and neighborhood size features are predictable, but not the TIL score? I don't
 have an explanation for how that could happen, though.
+
+# Interpreting Models
+
+```{r}
+y <- as.numeric(scale(spatial_comp$me))
+fits <- fit_wrapper(x, y)
+```
+
+First, let's study the output of the glmnet model, even though it's performance is lower.
+
+```{r}
+plot(fits$glmnet$glmnet.fit)
+beta_hat <- coef(fits$glmnet$glmnet.fit)[, 10]
+
+imp_ix <- order(abs(beta_hat), decreasing = TRUE)
+
+mx <- data.frame(x = x[, imp_ix[1:10] - 1], y = y) %>%
+  melt(id.vars = c("y"))
+
+ggplot(mx) +
+  geom_point(aes(x = value, y = y)) +
+  facet_wrap(~ variable)
+
+y_order <- order(y)
+image(t(cbind(y[y_order] / 4, x[y_order, imp_ix[1:10] - 1])))
+```
+
+How can we interpret the associated clusters?
+
+```{r}
+z <- cell_clusters$centers
+mcenters <- melt(z, varnames = c("cluster", "protein")) %>%
+  mutate(
+    protein = factor(protein, colnames(z)[hclust(dist(t(z), method="manhattan"))$order]),
+    cluster = factor(cluster, hclust(dist(z, method = "manhattan"))$order),
+    )
+
+mcenters <- mcenters %>%
+  left_join(data.frame(
+      cluster = factor(0:20, levels = c(0, levels(mcenters$cluster))),
+      beta = beta_hat
+    ))
+
+ggplot(mcenters) +
+  geom_bar(
+    aes(x = protein, y = value, fill = beta),
+    stat = "identity"
+  ) +
+  scale_fill_viridis() +
+  scale_y_continuous(limits = c(-2, 6), oob = scales::squish) +
+  facet_wrap(~ cluster) +
+theme(axis.text.x = element_text(angle = -90, hjust = 0))
+
+ggplot(mcenters %>% filter(beta != 0)) +
+  geom_bar(
+    aes(x = protein, y = value, fill = beta),
+    stat = "identity"
+  ) +
+  scale_fill_viridis() +
+  scale_y_continuous(limits = c(-2, 6), oob = scales::squish) +
+  facet_grid(cluster ~ .) +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0))
+```
+
+We can make something similar for the random forest model.
+
+
+# Inspecting Residuals
+
+# F-Statistic Analog
+
+
+
+# 
