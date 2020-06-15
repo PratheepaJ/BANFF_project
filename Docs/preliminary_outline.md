@@ -248,3 +248,96 @@ then look for typical device outputs (as well as the typical variation around
 them). So, instead of potential outcomes, we have potential sensings; instead of
 a one dimensional treatment effect of interest, we have some more complex
 mapping between sensor readings.
+
+## Talk Outline
+
+Title: Spatial and **??? from MIBI-TOF**
+
+I. Introduction
+  A. Overview
+    1. Two sets of immunological measurements on breast cancer patients
+    2. Both give a sense of "tumor ecology"
+      a. It's like having different sensor instruments in the wild
+      b. There is some underlying truth, we have two different datasets
+      reflecting the same latent structure
+      c. Comparison: Think of camera traps and drone imagery
+        i. Analogy is useful later on too: are we interested in how species are
+        interacting with one another, or is it enough to just have counts of the
+        animals
+  B. Description
+    2. MIBI-TOF
+      a. # Samples
+      b. # features. Many of these are cell markers.
+      c. Pictures
+      d. Example histograms
+      e. Supplementary features: Stage, survival, ...
+    2. Mass Spec
+      a. # Samples
+      b. # features
+      c. Example histograms
+    3. Caveat: Throughout my analysis, I work with relatively small subset of
+       the data. Crop to a corner of the large image.
+II. Cell-Level Analysis
+  A. Motivation
+    1. To what extent can a cheap assay be a proxy for a powerful one?
+      a. This is the imputation view
+      b. Can we use the cheap assay to tell us when the powerful one would be
+      worth running, vs. being a waste of time?
+    2. We suspect there are a few main latent phenomena. To what extent are the
+       latent phenomena shared? Perhaps show a diagram with three latents
+      a. Can we relate each of the datasets that we have to a set of shared
+      phenomena
+    3. Draw a picture: When cells have a particular set of neighborhoods, do
+       they always have the same type of expression profile?
+      a. Can we figure out that profile from just the cytof information.
+  B. Proposal
+    1. Maybe the proper thing to do would be to write down a full generative model
+    2. Concern: Not convinced this will be easy to develop. Also not sure how
+       broadly applicable it will be... unless there are very naturally reusable
+       components, I have doubts
+    3. Alternatively, learn some embedding, and directly learn functions to do
+       the inversion.
+       a. Embedding is over the neighborhood fractions (but avoid using the cell
+       label)
+       b. Alternatively, we could compute the entropy features? It would be a
+       good intuition builder.
+       c. This should be more straightforwards to interpret than the version
+       that used all the neighborhoods. We can also have the TIL-Score.
+       d. Key idea: Since the inversion will only use the cell-markers in the
+       intersection of the two datasets, we can train on the intersection which
+       we have, and then apply to the cytof.
+  C. Results
+    1. Results using neighborhood composition
+    1. As you increase the number of antigens, your ability to predict increases
+    2. Doesn't seem totally do-able with the cytof data that we have, though
+    3. Plots
+      a. Model cross validation error?
+      b. Prediction vs. truth
+      c. ?
+III. Visualization
+  A. Transition
+    1. Let's build some intuition about the data, before looking into the models
+  B. How to understand it
+    1. There are two spaces, the true spatial co-locations, and also the
+       abstract expression similarities
+  C. Interpretation
+    1. Would be interesting to extend it to the cell-level analysis as well
+IV. Sample-Level Analysis
+  A. Motivation
+    1. Varying interests: Do we want data to be perfectly aligned? Sort of, but
+       not really. What we really want is a good sense of what is, and is not,
+       in common between these methods. Measures of redundancy and
+       pseudo-orthogonality.
+  B. Proposal
+    1. First approach is to predict spatial features from just the expression levels
+    2. Second approach is to use both spatial and expression in prediction of
+       interesting outcomes
+  C. Results
+    1. We *can* predict spatial from expression
+    2. We *cannot* predict phenotypes from either
+      a. We should be able to predict TIL score from one vs. other, though
+V. Results for Sample-Level Analysis
+
+II. Conclusion
+  A. Main Takeaways
+  B. Some interesting directions
