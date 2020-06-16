@@ -277,6 +277,19 @@ entropies <- function(G, clusters_) {
   do.call(c, ents)
 }
 
+cluster_props <- function(G, clusters_) {
+  props <- list()
+  for (g in seq_along(G)) {
+    counts <- table(clusters_[names(V(G[[g]]))])
+    props[[g]] <- counts / sum(counts)
+  }
+
+  props_df <- bind_rows(props) %>%
+    mutate_all(function(z) { z[is.na(z)] <- 0; z })
+  colnames(props_df) <- paste0("prop_", colnames(props_df))
+  props_df
+}
+
 avg_dists <- function(G) {
   dists <- list()
 
@@ -301,4 +314,37 @@ fit_wrapper <- function(x, y) {
   rf_fit <- caret::train(x, y)
   print(rf_fit)
   list(rf = rf_fit, glmnet = glmnet_fit)
+}
+
+extract_graphs <- function(ims, sample_names) {
+  graphs <- list()
+  for (i in seq_along(sample_names)) {
+    print(sprintf("graph %s/%s", i, length(sample_names)))
+    poly <- polygonize(ims[[sample_names[i]]]) %>%
+      filter(cellLabelInImage > 1)
+    graphs[[i]] <- extract_graph(poly)
+  }
+
+  graphs
+}
+
+spatial_wrapper <- function(sample_names, graphs, cluster_ids) {
+  spatial <- list()
+  for (i in seq_along(sample_names)) {
+    print(sprintf("spatial stats %s/%s", i, length(sample_names)))
+    SG <- subgraphs(graphs[[i]])
+    ptrn <- paste0("^", sample_names[i], "_")
+    clusters_ <- cluster_ids[grepl(ptrn, names(cluster_ids))]
+    names(clusters_) <- gsub(ptrn, "", names(clusters_))
+
+    spatial[[sample_names[i]]] <- tibble(
+      scell = paste0(sample_names[i], "_", names(V(graphs[[i]]))),
+      entropy = entropies(SG, clusters_),
+      avg_dists = avg_dists(SG),
+      cluster_props(SG, clusters_)
+    )
+  }
+
+  bind_rows(spatial) %>%
+    mutate_all(function(z) { z[is.na(z)] <- 0; z})
 }

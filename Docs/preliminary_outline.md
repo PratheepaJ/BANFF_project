@@ -253,7 +253,13 @@ mapping between sensor readings.
 
 Title: Spatial and **??? from MIBI-TOF**
 
-I. Introduction
+Title: Complementary Information in Tumor Ecosystems
+
+Summary: How can we piece together a coherent view of tumor ecosystems and disease, integrating multiple instruments (Mass Cytometry and MIBI-TOF) and multiple scales (cells, tissues, human populations)? This talk will be a crash course in adapting exploratory methods, interactive visualization, and supervised learning to relate complementary data sources. Will highlight the challenge of measuring the degree to which different data sources provide redundant (or novel) information, and propose some preliminary approaches.
+
+Bio: Kris Sankaran will start as an Assistant Professor in the Statistics Department at the University of Wisconsin, Madison in August 2020. He recently completed his postdoc at the Quebec AI Institute, working in Yoshua Bengio's lab. Her previously completed his PhD in Statistics at Stanford under the supervision Susan Holmes, focusing on latent variable methods in the microbiome.
+
+I. Introduction (2 minutes)
   A. Overview
     1. Two sets of immunological measurements on breast cancer patients
     2. Both give a sense of "tumor ecology"
@@ -268,7 +274,7 @@ I. Introduction
     2. MIBI-TOF
       a. # Samples
       b. # features. Many of these are cell markers.
-      c. Pictures
+      c. Maps of the cells: sort them by survival, for example
       d. Example histograms
       e. Supplementary features: Stage, survival, ...
     2. Mass Spec
@@ -277,10 +283,20 @@ I. Introduction
       c. Example histograms
     3. Caveat: Throughout my analysis, I work with relatively small subset of
        the data. Crop to a corner of the large image.
-II. Cell-Level Analysis
+II. Visualization (2 minutes)
+  A. Transition
+    1. Let's build some intuition about the data, before looking into the models
+  B. How to understand it
+    1. There are two spaces, the true spatial co-locations, and also the
+       abstract expression similarities
+    2. What are the colors, what happens when I highlight one point vs. another
+  C. Interpretation
+    1. Would be interesting to extend it to the cell-level analysis as well
+III. Cell-Level Analysis (4 minutes)
   A. Motivation
     1. To what extent can a cheap assay be a proxy for a powerful one?
-      a. This is the imputation view
+      a. This is the imputation view. Can I at least get a bound on what the
+      ecosystem would look like using the other camera?
       b. Can we use the cheap assay to tell us when the powerful one would be
       worth running, vs. being a waste of time?
     2. We suspect there are a few main latent phenomena. To what extent are the
@@ -308,36 +324,61 @@ II. Cell-Level Analysis
        we have, and then apply to the cytof.
   C. Results
     1. Results using neighborhood composition
-    1. As you increase the number of antigens, your ability to predict increases
-    2. Doesn't seem totally do-able with the cytof data that we have, though
-    3. Plots
-      a. Model cross validation error?
-      b. Prediction vs. truth
-      c. ?
-III. Visualization
-  A. Transition
-    1. Let's build some intuition about the data, before looking into the models
-  B. How to understand it
-    1. There are two spaces, the true spatial co-locations, and also the
-       abstract expression similarities
-  C. Interpretation
-    1. Would be interesting to extend it to the cell-level analysis as well
-IV. Sample-Level Analysis
+      a. As you increase the number of antigens, your ability to predict increases
+      b. Doesn't seem totally do-able with the cytof data that we have, though
+      c. Plots
+        i. Model cross validation error?
+        ii. Prediction vs. truth
+        iii. ?
+    2. Results using just entropy and average distance to neighbors
+      a. Show the same figures. U-Maps, and then ability to predict.
+      b. This is also a reasonable transition to the next part, where these
+      features are key
+IV. Sample-Level Analysis (5 minutes)
   A. Motivation
-    1. Varying interests: Do we want data to be perfectly aligned? Sort of, but
-       not really. What we really want is a good sense of what is, and is not,
-       in common between these methods. Measures of redundancy and
-       pseudo-orthogonality.
+    1. Making predictions at the cell level is clearly hard
+    2. But, remember that some of the most interesting scientific associations
+       were happening at the sample level. People were looking at the Tumor
+       Invasion Score, not making arguments about individual cells.
   B. Proposal
-    1. First approach is to predict spatial features from just the expression levels
+    1. First approach is to predict spatial features from just the expression
+       levels. This has a kind of information theoretic interpretation. I(X, Y)
+       is high if the channel transforming one into the other has very low
+       noise.
+         a. How to use the expression features, when we're thinking about the
+         sample level?
+         b. Idea is to do clustering on the expression space, and summarize each
+         sample as a mixture of those underlying expression cell types
     2. Second approach is to use both spatial and expression in prediction of
-       interesting outcomes
+       interesting outcomes. Has a kind of regression interpretation -- when you
+       add in redundant variables in regression, your performance goes down.
+       Relies on external phenotypic information as a proxy for distinguishing
+       "signal" from "noise"
   C. Results
     1. We *can* predict spatial from expression
+      a. Even though we couldn't impute spatial features at the individual cell
+      level, we could at the sample level
+      b. Report the prediction performance, show the y vs. y_hat.
+      c. Show a heatmap of compositions
+      d. Show how compositions are related to y_hat
+      e. Show how to interpret the important features
+        i. Especially these clusters colored in
     2. We *cannot* predict phenotypes from either
       a. We should be able to predict TIL score from one vs. other, though
-V. Results for Sample-Level Analysis
-
-II. Conclusion
-  A. Main Takeaways
-  B. Some interesting directions
+      b. This will give a measure of the redundancy as well
+V. Themes (2 minute)
+    1. The "sample" is a fuzzy concept
+      a. You can look at the data at several levels of resolution
+      b. The answers we get out (e.g., spatial expression patterns) are very different between each
+    2. The "feature" is a fuzzy concept
+      a. We had to make up more interesting spatial features to work with.
+      b. Makes graph nnet or autoencoders interesting. 
+      c. Especially in conjunction with some sort of interactive visualization,
+      we might have something interesting to say
+    3. Measuring redundancy
+      a. It would have been weird if the mass-spec could give you everything you
+        wanted from MIBI-ToF
+      b. What the analysis so far suggests is that some, but not all, information
+        is recoverable
+      c. Can we measure the degree of redundancy between the datasets? How much is
+        in common, and how much is really just different.

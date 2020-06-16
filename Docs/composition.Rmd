@@ -34,7 +34,7 @@ mibi_sce <- subsample$exper
   - otherwise, it's a surprise to the community
 
 ```{r}
-cell_clusters <- kmeans(t(assay(mibi_sce)), params$K)
+cell_clusters <- kmeans(t(assay(mibi_sce)), params$cluster_K, iter.max=50)
 props <- sample_proportions(colData(mibi_sce)$SampleID, cell_clusters$cluster)
 mprops <- data.frame(props)
 ```
@@ -72,28 +72,8 @@ ggplot(mprops %>% left_join(cd_samp)) +
 Extract local entropy and neighborhood sizes.
 ```{r spatial_stat, message = FALSE, warning = FALSE}
 sample_names <- as.character(cd_samp$SampleID)
-graphs <- list()
-for (i in seq_along(sample_names)) {
-  print(sprintf("graph %s/%s", i, length(sample_names)))
-  poly <- polygonize(ims[[sample_names[i]]]) %>%
-    filter(cellLabelInImage > 1)
-  graphs[[i]] <- extract_graph(poly)
-}
-
-spatial <- list()
-for (i in seq_along(sample_names)) {
-  print(sprintf("spatial stats %s/%s", i, length(sample_names)))
-  SG <- subgraphs(graphs[[i]])
-  ptrn <- paste0("^", sample_names[i], "_")
-  clusters_ <- cluster_ids[grepl(ptrn, names(cluster_ids))]
-  names(clusters_) <- gsub(ptrn, "", names(clusters_))
-
-  spatial[[sample_names[i]]] <- tibble(
-    scell = paste0(sample_names[i], "_", names(V(graphs[[i]]))),
-    entropy = entropies(SG, clusters_),
-    avg_dists = avg_dists(SG)
-  )
-}
+graphs <- extract_graphs(ims, sample_names)
+spatial <- spatial_wrapper(sample_names, graphs, cluster_ids)
 ```
 
 ```{r plot_spatial}
@@ -114,9 +94,7 @@ spatial_samp <- spatial %>%
 
 spatial_cell <- spatial %>%
   tidyr::separate(scell, c("SampleID", "cellLabelInImage")) %>%
-  mutate(
-    cellLabelInImage = as.numeric(cellLabelInImage)
-  ) %>%
+  mutate(cellLabelInImage = as.numeric(cellLabelInImage)) %>%
   left_join(cd)
 ```
 
@@ -438,6 +416,5 @@ qplot(x = cd_samp$TIL_score, y = cd_samp$Survival_days_capped_2016.1.1, col = as
 ```
 
 # Predicting Tables of Features
-
 
 Can we say anything more about interpretation as well?
