@@ -9,6 +9,10 @@ params:
   R: 100
 ---
 
+We use this R Markdown to run the topic modeling. 
+
+Then, we use proteomics_workflow_mibi_cytof_LDA_res.Rmd to generate results.
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE,
@@ -406,43 +410,48 @@ assay(mibi) <- y_mibi
 
 # Merge two SingleCellExperiment objects and make mae
 ```{r}
-se_cd45 <- SummarizedExperiment(
-  assays = list(exprs = assay(cd45_sce_inv)),
-  colData = colData(cd45_sce_inv),
-  rowData = rowData(cd45_sce_inv)
-)
-
-se_mibi <- SummarizedExperiment(
-  assays = list(exprs = assay(mibi)),
-  colData = colData(mibi),
-  rowData = rowData(mibi)
-)
-
-
-cd45_mibi <- list("cd45" = se_cd45, "mibi" = se_mibi)
-
-cd45_map <- data.frame(primary = as.character(se_cd45$cell_id),
-                     colname = as.character(se_cd45$cell_id), 
-                     stringsAsFactors = FALSE)
-
-mibi_map <- data.frame(primary = as.character(se_mibi$cell_id),
-                     colname = as.character(se_mibi$cell_id), 
-                     stringsAsFactors = FALSE)
-
-listmap <- list(cd45_map, mibi_map)
-names(listmap) <- names(cd45_mibi)
-
-dfmap <- listToMap(listmap = listmap)
-
-sam_se_cd45 <- colData(se_cd45) %>% data.frame() %>% as.tibble()
-sam_se_mibi <- colData(se_mibi) %>% data.frame() %>% as.tibble()
-map_df <- full_join(sam_se_cd45, sam_se_mibi, by = "cell_id")
-map_df %<>% as.data.frame
-rownames(map_df) <- map_df$cell_id 
-
-mae <- MultiAssayExperiment(experiments = cd45_mibi,
-                             colData = map_df, 
-                             sampleMap = dfmap)
+# se_cd45 <- SummarizedExperiment(
+#   assays = list(exprs = assay(cd45_sce_inv)),
+#   colData = colData(cd45_sce_inv),
+#   rowData = rowData(cd45_sce_inv)
+# )
+# 
+# se_mibi <- SummarizedExperiment(
+#   assays = list(exprs = assay(mibi)),
+#   colData = colData(mibi),
+#   rowData = rowData(mibi)
+# )
+# 
+# 
+# cd45_mibi <- list("cd45" = se_cd45, "mibi" = se_mibi)
+# 
+# cd45_map <- data.frame(primary = as.character(se_cd45$cell_id),
+#                      colname = as.character(se_cd45$cell_id), 
+#                      stringsAsFactors = FALSE)
+# 
+# mibi_map <- data.frame(primary = as.character(se_mibi$cell_id),
+#                      colname = as.character(se_mibi$cell_id), 
+#                      stringsAsFactors = FALSE)
+# 
+# listmap <- list(cd45_map, mibi_map)
+# names(listmap) <- names(cd45_mibi)
+# 
+# dfmap <- listToMap(listmap = listmap)
+# 
+# sam_se_cd45 <- colData(se_cd45) %>% data.frame() %>% as.tibble()
+# sam_se_mibi <- colData(se_mibi) %>% data.frame() %>% as.tibble()
+# map_df <- full_join(sam_se_cd45, sam_se_mibi, by = "cell_id")
+# map_df %<>% as.data.frame
+# rownames(map_df) <- map_df$cell_id 
+# 
+# mae <- MultiAssayExperiment(experiments = cd45_mibi,
+#                              colData = map_df, 
+#                              sampleMap = dfmap)
+# mae
+source("../R_BANF/makeMAEfromSCE.R")
+mae <- makeMAEfromSCE(sce_list = list(cd45_sce_inv, mibi), 
+                      name_assays = c("cd45", "mibi"),
+                      sampleID_name = "cell_ID")
 mae
 ```
 
