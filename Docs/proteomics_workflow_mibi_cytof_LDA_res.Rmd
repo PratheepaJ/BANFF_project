@@ -1,0 +1,886 @@
+---
+title: "Integrating proteomics data"
+author: "Pratheepa Jeganathan, Susan Holmes"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: 
+  BiocStyle::html_document
+params:
+  K: 3
+  R: 100
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 20,
+  fig.height = 15)
+```
+
+```{r read_arg}
+K <- params$K
+K
+iter <- params$R
+iter
+```
+
+```{r}
+library(SingleCellExperiment)
+library(ggplot2)
+library(rstan)
+library(plyr)
+library(reshape2)
+library(readr)
+library(magrittr)
+library(MultiAssayExperiment)
+library(dplyr)
+library(DESeq2)
+library(abind)
+library(tibble)
+library(RColorBrewer)
+library(raster)
+library(stringr)
+library(ggthemes)
+library(pheatmap)
+library(gtools)
+```
+
+# CyTOF
+- Wagner 2018 Cytof
+  - 140 breast cancer patients; Of 140, 6 tripple negative (TN)
+  - cd45_sce_dropna$Clinical.Subtype == "TN
+  - 3 cancer-free
+  - 73 protein markers in immune-centric and tumor-centric microenvironment
+  
+- Keren 2018 Multiplex Ion Bean Imaging (MIBI)
+  - Tumor-immune microenvironment in TN patients
+  - 41 TN patients
+  - 36 proteins
+  
+We will choose patients with TN with immune and tumor cells in both CyTOF and MIBI for the integrative analysis.
+
+We will choose one patient from CyTOF (BB028) and one patient from MIBI. 
+
+We make a multi-assay experiemnt object.
+
+We do inverse transformation of cytof data.
+
+We use the upper limit of cytof data to scale the mibi (normalized) data to the range of cytof data. 
+
+After making same units in both cytof and mibi, we impute the protein expression that is not measured in one of the platform.
+
+We round the protein expressio to integer.
+
+We use topic modeling to find the dominated topics in cytof and mibi cells.
+
+We assign the spatial location of mibi cells to the cytof data if the difference between the topic distribution of the dominated topic in the cytof and the dominated topic in the mibi is the minimum.
+
+We infer spatial location of cytof cells using the mibi (one patient, but we can increase the number of patients).
+
+We plot the spatial co-location of cytof cells related to the mibi spatial location.
+
+
+## Join the assays and impute
+```{r}
+mae <- readRDS("../Results/mae_mibi_cytof_one.rds")
+x1 <- assay(mae[["cd45"]]) %>% t() %>% data.frame()
+x2 <- assay(mae[["mibi"]]) %>% t() %>%  data.frame()
+x <-  full_join(x1, x2)
+markers <- colnames(x)
+cells <- c(rownames(x1), rownames(x2))
+common_markers <- colnames(x1)[colnames(x1) %in% colnames(x2)]
+common_markers
+#rm(x1,x2) 
+
+# some features are not recorded in one domain - impute data after scaling
+colMissing <- apply(x, 2, function(y){mean(is.na(y))})
+
+temp <- x %>% as.matrix() %>% t()
+rm(x1, x2)
+```
+
+```{r eval=FALSE}
+imdata <- impute::impute.knn(temp, k=5, rowmax = 0.5, colmax = 0.9)$data # temp is variables in the rows and samples in the columns
+# x[is.na(x)] <- 0
+saveRDS(imdata, "../Results/imdata_mibi_cytof_one.rds")
+
+```
+
+```{r}
+imdata <- readRDS("../Results/imdata_mibi_cytof_one.rds")
+x <- imdata %>% t()
+rownames(x) <- cells
+rm(imdata, temp)
+```
+
+
+# Topic modeling
+
+
+Consider test cells
+```{r eval=FALSE}
+test_samples <- sample(rownames(x2), size = round(length(rownames(x2))*0.1, digits = 0))
+saveRDS(test_samples, file = "../Results/test_samples_one_mibi_one_cytof.rds")
+```
+
+```{r}
+test_samples <- readRDS("../Results/test_samples_one_mibi_one_cytof.rds")
+x_test_train <- x
+x_test <- x[test_samples, ]
+x_test <- apply(x_test , c(1,2), function(y){as.integer(y)})
+x_test <- as.matrix(x_test)
+mae_test <- mae[, test_samples,]
+
+x_train <- x[!(rownames(x) %in% test_samples), ]
+x_train <- apply(x_train , c(1,2), function(y){as.integer(y)})
+x_train <- as.matrix(x_train)
+mae_train <- mae[, which(!(rownames(x) %in% test_samples)),]
+```
+
+
+```{r eval=FALSE}
+# theta[d] ~ dirichlet(alpha), alpha pseudocount for each topic
+# beta[k] ~ dirichlet(gamma), gamma pseudocount for each ASV in each topic
+stan.data <- list(K = K, 
+  V = ncol(x_train), 
+  D = nrow(x_train), 
+  n = x_train, 
+  alpha = rep(.8, K), 
+  gamma = rep(.5, ncol(x_train))
+)
+```
+
+```{r}
+fileN <- paste0("../Results/LDA_mibi_cytof_one_K_",K,"_ite_",iter,".RData")
+fileN
+```
+
+
+
+```{r eval=FALSE}
+t1 <- proc.time()
+stan.fit <- stan(file = "./lda.stan", 
+  data = stan.data, 
+  iter = iter, 
+  chains = 4, 
+  sample_file = NULL,
+  diagnostic_file = NULL,
+  cores = 4,
+  control = list(adapt_delta = 0.9),
+  save_dso = TRUE,
+  algorithm = "NUTS")
+proc.time() - t1
+
+save(stan.fit, file = fileN)
+```
+
+```{r}
+load(file = fileN)
+```
+
+
+
+Sampler diagnostics
+```{r}
+sampler_params <- get_sampler_params(stan.fit, 
+                                     inc_warmup = FALSE)
+colnames(sampler_params[[1]])
+
+mean_accept_stat_by_chain <- sapply(sampler_params, 
+                                    function(x) mean(x[, "accept_stat__"]))
+mean_accept_stat_by_chain
+
+max_treedepth_by_chain <- sapply(sampler_params, 
+                                 function(x) max(x[, "treedepth__"]))
+max_treedepth_by_chain
+```
+
+
+# Visualization 
+
+## Extract posterior samples
+```{r}
+samples <- rstan::extract(stan.fit, 
+                          permuted = TRUE, 
+                          inc_warmup = FALSE, 
+                          include = TRUE)# samples is a list
+rm(stan.fit)
+```
+
+## Alignment
+- Create a Topic $*$ Chain matrix
+```{r}
+source("../R_BANF/alignmentMatrixMAE.R")
+source("../R_BANF/thetaAligned.R")
+theta <- samples$theta 
+# theta <- theta[c(1:25, 51:75, 101:125, 151:175) , , ]
+
+# aligned <- alignmentMatrixMAE(theta, 
+#                            mae_train, 
+#                            K, 
+#                            iter = iter, 
+#                            chain = 4,
+#                            SampleID_name = "cell_id")
+# theta_aligned <- thetaAligned(theta, 
+#                               K, 
+#                               aligned, 
+#                               iter = iter, 
+#                               chain = 4)
+theta_aligned <- theta[1:(iter/2), ,]
+dimnames(theta_aligned)[[2]] <- mae_train$cell_id
+dimnames(theta_aligned)[[3]] <- c(paste0("Topic_", seq(1,K)))
+
+# array to a dataframe
+theta_all <- melt(theta_aligned)
+colnames(theta_all) <- c("iteration", "Sample", "Topic", "topic.dis")
+theta_all$Chain <- paste0("Chain ", rep(seq(1, 1), each = (iter/2)))
+
+sam <- colData(mae_train) %>% data.frame()
+theta_all$Sample <- as.character(theta_all$Sample)
+theta_all <- left_join(theta_all, sam, by =c("Sample"= "cell_id"))
+theta_all$Chain <- factor(theta_all$Chain)
+theta_all$Topic <- factor(theta_all$Topic)
+theta_all$Sample <- factor(theta_all$Sample)
+
+theta_all$cell_type <- factor(theta_all$cell_type)
+theta_all$method <- ifelse(is.na(theta_all$cell_type), "cytof", as.character(theta_all$cell_type))
+```
+
+
+
+```{r}
+manual_col <- tableau_color_pal("Classic 20")(length(unique(theta_all$method)))
+
+theta_summary <- theta_all %>% 
+  group_by(Sample, Topic, method) %>% 
+  summarize(median.topic.dis = median(topic.dis)) %>% 
+  ungroup() %>% 
+  mutate(Topic = factor(Topic, levels = rev(str_c("Topic_",1:K))))
+
+#theta_summary <- dplyr::filter(theta_summary, cell_type %in% c("Macrophages", "Tumor"))
+
+sample_cells <- unique(theta_summary$Sample)
+sample_cells_select <- sample(sample_cells, 50)
+
+theta_summary <- dplyr::filter(theta_summary, 
+                               Sample %in% sample_cells_select)
+
+p <- ggplot(theta_summary, 
+           aes(x = method, 
+               y = Topic, 
+               fill = method))
+p <- p+
+  geom_tile(aes(alpha = median.topic.dis))+
+  facet_grid(.~Sample, scale = "free")+
+  xlab("method") +
+  scale_fill_manual(name = "method", 
+                    values = manual_col) +
+  scale_alpha(name = "median topic distribution") +
+  theme_minimal(base_size = 20) +  
+  theme(plot.title = element_text(hjust = 0.5), 
+        strip.text.x = element_text(angle = 90), 
+        axis.text.x=element_blank()) 
+p
+
+ggsave(paste0("../Figures/topic_dis_mibi_cytof_one_K_",K, ".png"), p, width = 20, height = 10)
+rm( p)
+```
+
+
+
+## Marker distribution
+```{r}
+source("../R_BANF/betaAligned.R")
+beta <- samples$beta # an array (iterations *topic * marker)
+# beta_aligned <- betaAligned(beta, 
+#                             K, 
+#                             aligned, 
+#                             iter = iter, 
+#                             chain = 4) # an array (iterations *topic * ASV)
+beta_aligned <- beta[1:(iter/2), , ]
+# array to data frame
+beta_hat <- beta_aligned %>%
+  melt(varnames = c("iterations", "topic", "marker_ix"), 
+       value.name = "beta_h") %>% as_tibble()
+beta_hat$marker <- colnames(x_train)[beta_hat$marker_ix]
+
+
+# join rowData with beta_hat
+marker_info <- full_join(rowData(mae_train[["cd45"]]) %>% data.frame(), rowData(mae_train[["mibi"]]) %>% data.frame())
+marker_info$marker <- marker_info$marker_name
+
+
+beta_hat <- beta_hat %>%
+  left_join(marker_info, by = "marker") %>% mutate(topic = paste("Topic", topic))
+
+
+beta_hat$marker <- factor(beta_hat$marker)
+beta_hat$marker_ix <- factor(beta_hat$marker_ix)
+beta_hat$topic <- factor(beta_hat$topic)
+
+
+beta_summary <- beta_hat %>% 
+  dplyr::group_by(marker_ix, topic) %>% 
+  dplyr::summarise(
+    marker = marker[1],
+    beta_median = median(beta_h),
+    marker = marker[1],
+    hgnc_symbol = hgnc_symbol[1]
+  )
+
+beta_subset <- beta_summary
+beta_subset$marker_ix <- rep(seq_len(nrow(beta_subset) / K), each = K)
+rm(beta_summary, beta_hat)
+```
+
+
+```{r}
+beta_subset <- beta_subset %>% 
+  arrange(marker_ix, topic)
+
+beta_subset <- beta_subset %>%
+  mutate(Class = factor(marker, levels = unique(beta_subset$marker)),
+         Topic = str_remove(topic, "Topic "))
+
+
+beta_subset$Topic <- factor(beta_subset$Topic, levels = seq(1,K) %>% as.character())
+
+p <- ggplot(beta_subset, 
+            aes(x = Topic, 
+                y = marker, 
+                fill = beta_median)) +
+  geom_tile() +
+  ylab("Marker")+
+  scale_fill_gradientn(name = "Median marker distribution", 
+                       colours = c("gray98", "dodgerblue")) +  
+  theme_minimal(base_size = 20) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+p
+ggsave(paste0("../Figures/fea_dist_barplot_mibi_cytof_one_K_",K, ".png"), p, width = 20, height = 11)
+rm(p)
+```
+
+
+
+# Computing statistics after alignment
+
+## Compute predictive log likelihood in training set
+
+$$\left. K_{.j} \right \vert S_{j}, \theta_{j} , B  \sim  \text{Multinomial}\left( S_{j} , B  \theta_{j} \right), j =1, \cdots, N,$$
+```{r}
+log_lik_total_for_each_iteration <- numeric()
+for(it in 1:((iter/2)*1)){
+  log_lik <- numeric()
+    for(j in 1:dim(x_train)[1]){# For each sample j in the first posterior sample
+      p_vec_pos <- as.matrix(t(beta_aligned[it, , ])) %*% matrix(theta_aligned[it, j,], nrow = K, byrow = T)
+      
+      log_lik[j] <- dmultinom(x_train[j, ], size = sum(x_train[j, ]), prob = p_vec_pos, log = TRUE)
+    }
+  log_lik_total_for_each_iteration[it] <- sum(log_lik)
+}
+
+
+df_lp_corrected <- data.frame(lp = log_lik_total_for_each_iteration, 
+                             Chain = paste0("Chain ", rep(seq_len(1), each = (iter/2))))
+
+
+fileN <- paste0("../Results/df_lp_train_mibi_cytof_one_K_", K, ".rds")
+saveRDS(df_lp_corrected, fileN)
+
+p_lp <- ggplot(data = df_lp_corrected) +
+  geom_histogram(aes(x = lp, col = Chain, fill = Chain), 
+                 bins = 100) + 
+  theme_minimal(base_size = 20)
+p_lp
+
+ggsave(paste0("../Figures/lp_train_mibi_cytof_one_K_", K, ".png"), p_lp, width = 9, height = 6)
+rm(log_lik_total_for_each_iteration, df_lp_corrected, p_lp)
+```
+
+
+```{r eval=FALSE}
+df_lp_corrected_all_K <- data.frame()
+for(top in c(3:16, 20)){
+  fileN <- paste0("../Results/df_lp_train_mibi_cytof_one_K_", top, ".rds")
+  df_lp_corrected <- readRDS(fileN)
+  df_lp_corrected$Num_Topic <- paste0("T=", rep(top, (iter/2*1)))
+  df_lp_corrected_all_K <- rbind(df_lp_corrected_all_K, df_lp_corrected)
+}
+
+df_lp_corrected_all_K$Num_Topic <- factor(df_lp_corrected_all_K$Num_Topic, levels = c(paste0("T=", c(seq(3, 16), 20))
+))
+
+p <- ggplot(data = df_lp_corrected_all_K) + 
+  geom_boxplot(aes(x = Num_Topic, y = lp)) + 
+  ylab("Predictive log-likelihood in train data") + 
+  xlab("Number of topics")
+
+p
+ggsave("../Figures/lp_train_mibi_cytof_one.png", p, width = 7, height = 4)
+```
+
+
+## Compute $\hat{R}$
+
+```{r eval=FALSE}
+Rhat_theta <- matrix(nrow = dim(theta_aligned)[2], ncol = dim(theta_aligned)[3])
+ESS_bulk_theta <- matrix(nrow = dim(theta_aligned)[2], ncol = dim(theta_aligned)[3])
+ESS_tail_theta <- matrix(nrow = dim(theta_aligned)[2], ncol = dim(theta_aligned)[3])
+for(sam in 1:dim(theta_aligned)[2]){
+  for(top in 1:dim(theta_aligned)[3]){
+    sims_theta <- matrix(theta_aligned[ ,sam , top], nrow = (iter/2), ncol = 4, byrow = FALSE)
+    Rhat_theta[sam, top] <- Rhat(sims_theta)
+    ESS_bulk_theta[sam, top] <- ess_bulk(sims_theta)
+    ESS_tail_theta[sam, top] <- ess_tail(sims_theta)
+  }
+  
+}
+
+Rhat_theta <- as.vector(Rhat_theta)
+ESS_bulk_theta <- as.vector(ESS_bulk_theta)
+ESS_tail_theta <- as.vector(ESS_tail_theta)
+
+Rhat_beta <- matrix(nrow = dim(beta_aligned)[2], ncol = dim(beta_aligned)[3])
+ESS_bulk_beta <- matrix(nrow = dim(beta_aligned)[2], ncol = dim(beta_aligned)[3])
+ESS_tail_beta <- matrix(nrow = dim(beta_aligned)[2], ncol = dim(beta_aligned)[3])
+  
+for(top in 1:dim(beta_aligned)[2]){
+    for(fea in 1:dim(beta_aligned)[3]){
+      sims_beta <- matrix(beta_aligned[ , top, fea], nrow = (iter/2), ncol = 4, byrow = FALSE)
+      Rhat_beta[top, fea] <- Rhat(sims_beta)
+      ESS_bulk_beta[top, fea] <- ess_bulk(sims_beta)
+      ESS_tail_beta[top, fea] <- ess_tail(sims_beta)
+    }
+  
+}
+
+Rhat_beta <- as.vector(Rhat_beta)
+ESS_bulk_beta <- as.vector(ESS_bulk_beta)
+ESS_tail_beta <- as.vector(ESS_tail_beta)
+
+Rhat <- c(Rhat_theta, Rhat_beta)
+fileN <- paste0("../Results/Rhat_mibi_cytof_one_K_",K, ".rds")
+saveRDS(Rhat, fileN)
+
+ESS_bulk <- c(ESS_bulk_theta, ESS_bulk_beta)
+fileN <- paste0("../Results/ESS_bulk_mibi_cytof_one_K_",K, ".rds")
+saveRDS(ESS_bulk, fileN)
+
+ESS_tail <- c(ESS_tail_theta, ESS_tail_beta)
+fileN <- paste0("../Results/ESS_tail_mibi_cytof_one_K_",K, ".rds")
+saveRDS(ESS_tail, fileN)
+
+# R hat ~ 1.05
+p_rhat <- ggplot(data.frame(Rhat = Rhat)) +
+  geom_histogram(aes(x = Rhat), 
+                 fill = "lavender", 
+                 colour = "black", 
+                 bins = 100) +
+  theme_minimal(base_size = 20) +  
+  theme(plot.title = element_text(hjust = 0.5))  +
+  theme_minimal(base_size = 20) +
+  xlab("")
+p_rhat
+
+ggsave(paste0("../Figures/Rhat_mibi_cytof_one_K_",K, ".png"), p_rhat, width = 9, height = 6)
+
+rm(Rhat_theta, ESS_bulk_theta, ESS_tail_theta, Rhat_beta, ESS_bulk_beta, ESS_tail_beta, p_rhat,Rhat)
+```
+
+## Compute ESS
+
+```{r eval=FALSE}
+# ESS bulk and ESS tail at least 100 per Markov Chain in order to be reliable and indicate that estimates of respective posterior quantiles are reliable
+
+p_ess_bulk <- ggplot(data.frame(ESS_bulk = ESS_bulk)) +
+  geom_histogram(aes(x = ESS_bulk), 
+                 fill = "lavender", 
+                 colour = "black", 
+                 bins = 100) +
+  theme_minimal(base_size = 20) +  
+  theme(plot.title = element_text(hjust = 0.5))   + 
+  theme_minimal(base_size = 20) +
+  xlab("")
+
+# + 
+#   xlab("Effective sample size (ESS)")
+p_ess_bulk
+
+ggsave(paste0("../Figures/ess_bulk_mibi_cytof_one_K_",K, ".png"), p_ess_bulk, width = 9, height = 6)
+
+p_ess_tail <- ggplot(data.frame(ESS_tail = ESS_tail)) +
+  geom_histogram(aes(x = ESS_tail), 
+                 fill = "lavender", 
+                 colour = "black", 
+                 bins = 100) +
+  theme_minimal(base_size = 20) +  
+  theme(plot.title = element_text(hjust = 0.5))
+
+p_ess_tail
+ggsave(paste0("../Figures/ess_tail_mibi_cytof_one_K_",K, ".png"), p_ess_tail, width = 9, height = 6)
+
+rm(ESS_bulk, p_ess_bulk, ESS_tail, p_ess_tail)
+```
+
+# Model assesment on simulated data
+```{r eval=FALSE}
+# Simulated data
+x_sim <- samples$x_sim # iteration * samples * ASVs
+# Choose only the first chain
+x_sim <- x_sim[1:(iter/2), ,] # For each iteration, simulated data is x_sim[i, ,]
+x_max_asv <- apply(x %>% data.frame , 2, median)
+sim_ite <- dim(x_sim)[1]
+ite_plot <- 19# or ite_plot <- sim_ite
+#Find maximum of each asv for each iteration
+max_all <- data.frame(x_max_asv = x_max_asv)
+for(i in 1:ite_plot){
+  x_sim_i <- x_sim[i, ,]
+  max_x_sim_i <- apply(x_sim_i %>% data.frame , 2, median)
+  max_all <- cbind(max_all, max_x_sim_i)
+}
+
+colnames(max_all) <- c("x_med_obs", paste0("x_med_sim_1", seq(1, ite_plot)))
+avg_max_square <- numeric()
+
+# histogram of maximum
+max_all_long <- melt(max_all)
+max_all_long$type <- c(rep("observed", dim(x_sim)[3]), rep("simulated", dim(x_sim)[3]*(ite_plot)))
+p_hist_obs_sim <- ggplot(data = max_all_long) + 
+  geom_histogram(aes(x = value, group = variable, fill = type), 
+                 colour = "black",
+                 bins = 100) + 
+  facet_wrap(~variable, nrow = 5) +
+  theme(legend.position = "none")
+
+p_hist_obs_sim
+ggsave(paste0("../Figures/model_assesment_hist_obs_sim_mibi_cytof_one_K_",K, ".png"), p_hist_obs_sim, width = 12, height = 6)
+
+rm(x_sim, samples, p_hist_obs_sim)
+```
+
+The distribution of observed maximum of each protein expression (green color) is similar to maximum of simulated data from the fitted topic model.
+
+
+# Log posterior on the test data
+
+```{r eval=FALSE}
+#x_test
+dimnames(x_test) = NULL
+test_data = list(K = K,
+  V = ncol(x_test),
+  D = nrow(x_test),
+  n = x_test,
+  alpha = rep(.8, K),
+  gamma = rep(.5, ncol(x_test))
+)
+
+log_lik_total_for_each_iteration <- numeric()
+for(it in 1:((iter/2)*1)){
+  log_lik <- numeric()
+    for(j in 1:dim(x_test)[1]){# For each sample j in the test set
+      theta_aligned_sim <- rdirichlet(1, test_data$alpha)# simulate topic distribution from prior distribution
+      p_vec_pos <- as.matrix(t(beta_aligned[it, , ])) %*% matrix(theta_aligned_sim, nrow = K, byrow = T)
+      
+      log_lik[j] <- dmultinom(x_test[j, ], size = sum(x_test[j, ]), prob = p_vec_pos, log = TRUE)
+    }
+  log_lik_total_for_each_iteration[it] <- sum(log_lik)
+}
+
+
+df_lp_corrected <- data.frame(lp = log_lik_total_for_each_iteration, 
+                             Chain = paste0("Chain ", rep(seq_len(1), each = (iter/2))))
+
+fileN <- paste0("../Results/df_lp_test_mibi_cytof_one_K_", K, ".rds")
+saveRDS(df_lp_corrected, fileN)
+rm(x_test, log_lik_total_for_each_iteration, df_lp_corrected)
+```
+
+
+```{r eval=FALSE}
+df_lp_corrected_all_K <- data.frame()
+for(top in c(3:5, 15, 20)){
+  fileN <- paste0("../Results/df_lp_test_mibi_cytof_one_K_", top, ".rds")
+  df_lp_corrected <- readRDS(fileN)
+  df_lp_corrected$Num_Topic <- paste0("T=", rep(top, (iter/2*1)))
+  df_lp_corrected_all_K <- rbind(df_lp_corrected_all_K, df_lp_corrected)
+}
+
+df_lp_corrected_all_K$Num_Topic <- factor(df_lp_corrected_all_K$Num_Topic, levels = c(paste0("T=", c(seq(3, 5), 15, 20))
+))
+
+p <- ggplot(data = df_lp_corrected_all_K) + 
+  geom_boxplot(aes(x = Num_Topic, y = lp)) + 
+  ylab("Predictive log-likelihood in test data") + 
+  xlab("Number of topics")
+
+p
+ggsave("../Figures/lp_test_mibi_cytof_one.png", p, width = 7, height = 4)
+```
+
+# Infer spatial location of cytof immune cells
+
+based on the median topic distribution identified the most dominated topic in each cell
+```{r}
+theta_summary <- theta_all %>% 
+  group_by(Sample, Topic, method) %>% 
+  summarize(median.topic.dis = median(topic.dis)) %>% 
+  ungroup() %>% 
+  mutate(Topic = factor(Topic, levels = rev(str_c("Topic_",1:K))))
+
+theta_summary_2 <- theta_summary %>% 
+  dplyr::group_by(Sample) %>% 
+  dplyr::summarise(
+    max_topic = max(median.topic.dis),
+    Topic = Topic[which(median.topic.dis == max(median.topic.dis))],
+    method = method[1]
+  )
+
+saveRDS(theta_summary_2, paste0("../Results/co_location_mibi_cytof_one_K_", K, ".rds"))
+```
+
+MIBI has only one site so we may not be able to infer spatial location for some cells in CyTOF.
+
+```{r}
+# mibi X, Y coordinates
+df <- data.frame(Sample = mae_train$cell_id, X = mae_train$centroid_X, Y = mae_train$centroid_Y)
+df <- left_join(theta_summary_2, df, by = "Sample") %>% data.frame()
+df$Sample <- as.character(df$Sample)
+rownames(df) <- df$Sample
+for(i in 1:dim(df)[1]){
+  if(df$method[i] == "cytof"){
+    #subset the df mibi cells with the topic for ith ccytof cell
+    df_i <- filter(df, Topic == df$Topic[i] & method != "cytof")
+    com_cell_close_to_max_topic_i <- df_i$Sample[which(abs(df$max_topic[i] - df_i$max_topic) == min(abs(df$max_topic[i] - df_i$max_topic)))]
+    df$X[i] <- df$X[which(df$Sample == com_cell_close_to_max_topic_i)]
+    df$Y[i] <- df$Y[which(df$Sample == com_cell_close_to_max_topic_i)]
+  }
+}
+```
+
+Plot the spatial location of cytof cells from patient BB028
+```{r}
+manual_col <- tableau_color_pal("Classic 20")(length(unique(df$method)))
+df$method <- factor(df$method)
+df_cytof <- dplyr::filter(df, method == "cytof")
+p_co <- ggplot(data = df) + 
+  geom_point(aes(x= X, y = Y, col = method), size = 5) +
+  theme_minimal() +
+  scale_color_manual(values = manual_col)  +
+  theme(aspect.ratio = 1, legend.position = "right") +
+  labs(fill = "method") +
+  xlim(c(0, max(df$X))) +
+  ylim(c(0, max(df$Y))) + 
+  geom_text(data = df_cytof, aes(x = X, y= Y, label = Sample), check_overlap = TRUE)
+
+p_co
+
+ggsave(paste0("../Figures/co_location_mibi_cytof_one_K_", K, ".png"), p_co, width = 15, height = 15)
+```
+
+# Predict spatial pattern of proteins not measured in the MIBI-TOF
+```{r eval=FALSE}
+proteins_not_measured_mibi <- rowData(mae[["cd45"]])$marker_name[!(as.character(rowData(mae[["cd45"]])$marker_name) %in% as.character(rowData(mae[["mibi"]])$channel_name))] %>% as.character()
+
+# Simulated data
+x_sim <- samples$x_sim # iteration * samples * ASVs
+# Choose only the first chain
+x_sim <- x_sim[1, ,] # For each iteration, simulated data 
+colnames(x_sim) <- colnames(x_train)
+rownames(x_train) <- rownames(x_train)
+ind_mibi <- which(rownames(x_train) %in% colnames(assay(mae_train[["mibi"]])))
+x_sim_mibi <- x_sim[ind_mibi, ]
+ind_pro <- which(colnames(x_train) %in% proteins_not_measured_mibi)
+ind_pro_present <- which(!(colnames(x_train) %in% proteins_not_measured_mibi))
+
+x_sim_mibi_only_measured <- x_train[ind_mibi, ind_pro_present]
+x_sim_mibi_only_measured_t <- asinh(x_sim_mibi_only_measured) 
+
+x_sim_mibi_predict <- x_sim_mibi
+x_sim_mibi_predict_t <- asinh(x_sim_mibi_predict)
+
+library(uwot)
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_only_measured_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p1 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col)  +
+  labs(color = "Cell types") + 
+  ggtitle("UMAP with measured proteins") +
+  theme(aspect.ratio = 1, plot.title = element_text(hjust = 0.5))
+p1
+# UMAP of measured and predicted protein
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_predict_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p2 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col) +
+  theme(aspect.ratio = 1) +
+  labs(color = "Cell types")
+p2
+
+
+```
+
+
+```{r eval=FALSE}
+# Simulated data
+x_sim <- samples$x_sim # iteration * samples * ASVs
+# Choose only the first chain
+x_sim <- x_sim[4, ,] # For each iteration, simulated data 
+colnames(x_sim) <- colnames(x_train)
+rownames(x_train) <- rownames(x_train)
+ind_mibi <- which(rownames(x_train) %in% colnames(assay(mae_train[["mibi"]])))
+x_sim_mibi <- x_sim[ind_mibi, ]
+ind_pro <- which(colnames(x_train) %in% proteins_not_measured_mibi)
+ind_pro_present <- which(!(colnames(x_train) %in% proteins_not_measured_mibi))
+
+x_sim_mibi_only_measured <- x_train[ind_mibi, ind_pro_present]
+x_sim_mibi_only_measured_t <- asinh(x_sim_mibi_only_measured) 
+
+x_sim_mibi_predict <- x_sim_mibi
+x_sim_mibi_predict_t <- asinh(x_sim_mibi_predict)
+
+library(uwot)
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_only_measured_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p11 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col) +
+  theme(aspect.ratio = 1) +
+  labs(color = "Cell types")
+p11
+# UMAP of measured and predicted protein
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_predict_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p22 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col) +
+  labs(color = "Cell types") + 
+  ggtitle("UMAP with measured and predicted proteins") +
+  theme(aspect.ratio = 1, plot.title = element_text(hjust = 0.5))
+p22
+
+
+```
+
+
+```{r eval=FALSE}
+# Simulated data
+x_sim <- samples$x_sim # iteration * samples * ASVs
+# Choose only the first chain
+x_sim <- x_sim[2, ,] # For each iteration, simulated data 
+colnames(x_sim) <- colnames(x_train)
+rownames(x_train) <- rownames(x_train)
+ind_mibi <- which(rownames(x_train) %in% colnames(assay(mae_train[["mibi"]])))
+x_sim_mibi <- x_sim[ind_mibi, ]
+ind_pro <- which(colnames(x_train) %in% proteins_not_measured_mibi)
+ind_pro_present <- which(!(colnames(x_train) %in% proteins_not_measured_mibi))
+
+x_sim_mibi_only_measured <- x_train[ind_mibi, ind_pro_present]
+x_sim_mibi_only_measured_t <- asinh(x_sim_mibi_only_measured) 
+
+x_sim_mibi_predict <- x_sim_mibi
+x_sim_mibi_predict_t <- asinh(x_sim_mibi_predict)
+
+library(uwot)
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_only_measured_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p13 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col) +
+  theme(aspect.ratio = 1) +
+  labs(color = "Cell types")
+p13
+# UMAP of measured and predicted protein
+# UMAP of measured proteins
+mibi_umap <- umap(x_sim_mibi_predict_t)
+umap_df <- data.frame(UMAP1 = mibi_umap[,1], 
+                      UMAP2 = mibi_umap[,2], 
+                      cell_id = colData(mae_train)$cell_id[ind_mibi])
+mibi_cell_data <- colData(mae_train)[ind_mibi, ] %>% data.frame()
+umap_df  <- left_join(umap_df, mibi_cell_data, by = "cell_id")
+
+manual_col <- tableau_color_pal("Classic 20")(length(unique(mae_train$cell_type)))
+
+p23 <- ggplot(data = umap_df, 
+       aes(x = UMAP1, y = UMAP2, color = cell_type)) + 
+  geom_point(size = 3) +
+  theme_bw() +
+  scale_color_manual(values = manual_col) +
+  labs(color = "Cell types")+ 
+  ggtitle("UMAP with measured and predicted proteins") +
+  theme(aspect.ratio = 1, plot.title = element_text(hjust = 0.5))
+p23
+
+
+```
+
+```{r eval=FALSE}
+# library(gtable)
+# library(grid)
+# g1 <- ggplotGrob(p1)
+# g2 <-  ggplotGrob(p22)
+# g3 <- ggplotGrob(p23)
+# g <- cbind(g1, g2)
+# 
+# g$widths <- unit.pmax(g1$widths, g2$widths)
+# grid.newpage()
+# grid.draw(g)
+
+library(gridExtra)
+com_p <- grid.arrange(p1, arrangeGrob(p22, p23, ncol=1), ncol=2, widths=c(1,1.2))
+
+ggsave("../Figures/predicted_mibi_protein.png", com_p, width = 20, height = 15)
+```
