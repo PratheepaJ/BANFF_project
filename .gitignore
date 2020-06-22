@@ -5,6 +5,14 @@ Docs/proteomics_posted_by_organizers.Rmd
 Docs/proteomics_workflow_mibi_cytof_LDA_res_2448427.err
 .Rhistory
 .gitignore
+*.err
+Docs/proteomics_workflow_mibi_LDA.Rmd
+Docs/proteomics_workflow_mibi_LDA.sbatch
+Docs/proteomics_workflow_mibi2_cytof_LDA.Rmd
+Docs/proteomics_workflow_mibi2_cytof_LDA.sbatch
+Docs/proteomics_workflow.Rmd
+Docs/proteomics_workflow.sbatch
+Docs/proteomics_workflow2.Rmd
 <<<<<<< HEAD
 
 
