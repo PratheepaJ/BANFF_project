@@ -5,7 +5,11 @@ Docs/proteomics_posted_by_organizers.Rmd
 Docs/proteomics_workflow_mibi_cytof_LDA_res_2448427.err
 .Rhistory
 .gitignore
+<<<<<<< HEAD
 
 
+=======
+Meetings/
+>>>>>>> 38a39953ca5162639f74b5db2ba6b90555e025c7
 *.json
 *package-lock*
